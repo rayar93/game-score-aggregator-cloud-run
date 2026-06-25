@@ -70,8 +70,6 @@ machine. Never commit the database file, the venv, or any API keys.
 
 ## Secrets
 
-## Secrets
-
 Two kinds, needed by different parts:
 
 - API keys - Twitch client id/secret, which ARE your IGDB credentials (IGDB
