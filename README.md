@@ -52,8 +52,8 @@ team-AAA-summer2026/
 python -m venv .venv
 
 # 2. activate it
-#   .\.venv\Scripts\Activate.ps1 (Windows)
-#   source .venv/bin/activate    (macOS/Linux)
+.\.venv\Scripts\Activate.ps1 # Windows
+source .venv/bin/activate    # macOS/Linux
 
 # 3. install dependencies
 pip install -r requirements.txt
@@ -62,8 +62,8 @@ pip install -r requirements.txt
 python tools/build_dev_db.py
 
 # 5. (INGESTION ONLY) only if you'll run the scrapers, create your .env and add keys:
-#   copy .env.example .env      (Windows)
-#   cp   .env.example .env      (macOS/Linux)
+copy .env.example .env      # Windows
+cp   .env.example .env      # macOS/Linux
 ```
 
 The `.venv/` folder and your real `.env` are **git-ignored** - they stay on your
