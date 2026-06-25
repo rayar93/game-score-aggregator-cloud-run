@@ -67,15 +67,3 @@ machine. Never commit the database file, the venv, or any API keys.
 API keys (Twitch/IGDB) and the Cloud SQL connection string live in a local,
 git-ignored `.env` during development and in Cloud Run environment variables when
 deployed. `.env.example` lists which variables are needed, with no real values.
-(Formal Secret Manager integration is a Sprint 2 task.)
-
-## Sprints
-
-1. **Cloud slice (due 7/7):** Cloud SQL instance up, schema + existing data
-   migrated, `db.py` ported to Postgres, a minimal Flask app containerized and
-   deployed to Cloud Run, wired to Cloud SQL. *Definition of done: a public Cloud
-   Run URL returning real games from Cloud SQL.*
-2. **Build-out (due 7/21):** filters as web controls + the user-configurable
-   weighting UI; ingestion as a scheduled Cloud Run Job; Secret Manager.
-3. **Stretch + presentation (due 8/4):** accounts/ratings, ML recommendations,
-   demo and slides.
