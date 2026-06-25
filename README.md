@@ -32,7 +32,9 @@ team-AAA-summer2026/
 ├── .gitignore
 ├── .env.example            # template; copy to a local .env and add secret keys
 ├── schema.sql              # database schema (SQLite now; to be ported to Posgres)
+├── sample_data.sql         # whole .db won't fit on GitHub - workaround until we move to cloud
 ├── db.py                   # shared data-access layer
+├── rank.py                 # a CLI tool demonstrating how to call ranked_games
 ├── web/                    # Cloud Run service
 │   ├── app.py              # Flask app
 │   └── templates/          # Jinja2 pages
