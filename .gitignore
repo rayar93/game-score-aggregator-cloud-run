@@ -1,0 +1,17 @@
+# --- secrets: never commit these ---
+.env
+.igdb_token.json
+
+# --- importer resume state ---
+.igdb_bulk_progress.json
+
+# --- local database files ---
+*.db
+*.db-wal
+*.db-shm
+
+# --- python ---
+__pycache__/
+*.pyc
+.venv/
+venv/
