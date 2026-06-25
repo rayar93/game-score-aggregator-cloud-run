@@ -57,8 +57,8 @@ python -m venv .venv
 pip install -r requirements.txt
 
 # 4. build a local dev database (real games to develop against, NO keys needed)
-sqlite3 dev.db < schema.sql
-sqlite3 dev.db < sample_data.sql
+sqlite3 game_library.db < schema.sql
+sqlite3 game_library.db < sample_data.sql
 
 # 5. (INGESTION ONLY) only if you'll run the scrapers, create your .env and add keys:
 #   copy .env.example .env      (Windows)
