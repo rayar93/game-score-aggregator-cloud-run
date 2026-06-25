@@ -15,3 +15,14 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+
+# --- GCP / cloud credentials ---
+secrets/
+*-key.json
+service-account*.json
+
+# --- editor / OS stuff ---
+.vscode/
+.DS_Store
+Thumbs.db
+
