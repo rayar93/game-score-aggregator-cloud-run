@@ -38,9 +38,11 @@ team-AAA-summer2026/
 ├── web/                    # Cloud Run service
 │   ├── app.py              # Flask app
 │   └── templates/          # Jinja2 pages
-└── ingest/                 # Cloud Run Job
-    ├── igdb.py
-    └── steam.py
+├── ingest/                 # Cloud Run Job
+│   ├── igdb.py
+│   └── steam.py
+└── tools/
+    └── build_dev_db.py     # builds a small sample database
 ```
 
 ## Local setup
@@ -57,8 +59,7 @@ python -m venv .venv
 pip install -r requirements.txt
 
 # 4. build a local dev database (real games to develop against, NO keys needed)
-sqlite3 game_library.db < schema.sql
-sqlite3 game_library.db < sample_data.sql
+python tools/build_dev_db.py
 
 # 5. (INGESTION ONLY) only if you'll run the scrapers, create your .env and add keys:
 #   copy .env.example .env      (Windows)
