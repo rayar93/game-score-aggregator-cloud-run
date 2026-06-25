@@ -50,8 +50,8 @@ team-AAA-summer2026/
 python -m venv .venv
 
 # 2. activate it
-#   Windows (PowerShell):  .\.venv\Scripts\Activate.ps1
-#   macOS/Linux:           source .venv/bin/activate
+#   .\.venv\Scripts\Activate.ps1 (Windows)
+#   source .venv/bin/activate    (macOS/Linux)
 
 # 3. install dependencies
 pip install -r requirements.txt
