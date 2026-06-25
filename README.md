@@ -31,7 +31,7 @@ team-AAA-summer2026/
 ├── requirements.txt        # you must build your own venv from this
 ├── .gitignore
 ├── .env.example            # template; copy to a local .env and add secret keys
-├── schema.sql              # database schema (PostgreSQL)
+├── schema.sql              # database schema (SQLite now; to be ported to Posgres)
 ├── db.py                   # shared data-access layer
 ├── web/                    # Cloud Run service
 │   ├── app.py              # Flask app
@@ -54,7 +54,11 @@ python -m venv .venv
 # 3. install dependencies
 pip install -r requirements.txt
 
-# 4. create your local .env from the template and add your keys
+# 4. build a local dev database (real games to develop against, NO keys needed)
+sqlite3 dev.db < schema.sql
+sqlite3 dev.db < sample_data.sql
+
+# 5. (INGESTION ONLY) only if you'll run the scrapers, create your .env and add keys:
 #   copy .env.example .env      (Windows)
 #   cp   .env.example .env      (macOS/Linux)
 ```
@@ -64,6 +68,18 @@ machine. Never commit the database file, the venv, or any API keys.
 
 ## Secrets
 
-API keys (Twitch/IGDB) and the Cloud SQL connection string live in a local,
-git-ignored `.env` during development and in Cloud Run environment variables when
-deployed. `.env.example` lists which variables are needed, with no real values.
+## Secrets
+
+Two kinds, needed by different parts:
+
+- API keys - Twitch client id/secret, which ARE your IGDB credentials (IGDB
+  authenticates through Twitch; Steam needs no key). Needed ONLY to run the
+  ingestion scripts (ingest/). The web app and local development don't need them.
+- Database credentials - the Cloud SQL host/user/password. Needed by whatever
+  connects to the cloud database (the deployed web service, and ingestion when
+  pointed at Cloud SQL). NOT needed for local dev, which runs against the dev DB
+  built above.
+
+Both live in a local, git-ignored .env during development and in Cloud Run
+environment variables when deployed. .env.example lists the variable names with
+no real values. Never put a real key or connection string in a committed file.
