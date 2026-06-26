@@ -1,18 +1,17 @@
 -- ============================================================
--- Game library & recommendation database — schema v1
--- Target: SQLite 3
+-- Game library & recommendation database - schema v1
+-- Target: SQLite 3. Will migrate later to Postgres.
 --
 -- Core design goal: separate the CANONICAL game (one row per
 -- real-world game) from each SOURCE's record of it. Adding a new
 -- source later (Metacritic, GOG, Epic, ...) becomes new ROWS in
--- existing tables — never a schema change, never nullable
--- source-specific columns piling up on one wide table.
+-- existing tables - never a schema change
 -- ============================================================
 
-PRAGMA foreign_keys = ON;   -- SQLite ignores foreign keys unless you set this PER CONNECTION
+PRAGMA foreign_keys = ON;   -- SQLite ignores foreign keys unless set PER CONNECTION
 
 -- ------------------------------------------------------------
--- 1. SOURCES  (Steam, OpenCritic, IGDB, and whatever you add later)
+-- 1. SOURCES (Steam, OpenCritic, IGDB, and whatever we add later)
 -- ------------------------------------------------------------
 CREATE TABLE source (
     source_id    INTEGER PRIMARY KEY,
@@ -24,8 +23,8 @@ CREATE TABLE source (
 
 -- ------------------------------------------------------------
 -- 2. STAGING / LANDING ZONE
---    Raw API responses land here FIRST, before you reconcile them
---    into canonical games. This is what lets you re-derive every
+--    Raw API responses land here first, before we reconcile them
+--    into canonical games. This is what lets us re-derive every
 --    field later WITHOUT re-hitting a rate-limited API.
 -- ------------------------------------------------------------
 CREATE TABLE raw_fetch (
@@ -44,23 +43,23 @@ CREATE INDEX idx_raw_fetch_lookup ON raw_fetch(source_id, source_native_id);
 -- ------------------------------------------------------------
 CREATE TABLE game (
     game_id          INTEGER PRIMARY KEY,
-    canonical_title  TEXT NOT NULL,       -- the title you choose to trust / display
-    normalized_title TEXT NOT NULL,       -- lowercased, stripped of (TM)(R), editions, punctuation
-                                          --   -> half of your fallback match key
-    release_year     INTEGER,             -- the other half of the (title, year) match key
+    canonical_title  TEXT NOT NULL,       -- the title we choose to trust / display
+    normalized_title TEXT NOT NULL,       -- lowercased, stripped of (TM)(R), editions, punctuation.
+                                          -- half of our fallback match key
+    release_year     INTEGER,             --    the other half of the (title, year) match key
     release_date     TEXT,                -- full date when known (ISO 8601: 'YYYY-MM-DD')
     summary          TEXT,
     cover_image_id   TEXT,                -- IGDB cover art id; build a URL from it for the UI:
-                                          --   https://images.igdb.com/igdb/image/upload/t_cover_big/<id>.jpg
+                                          --    https://images.igdb.com/igdb/image/upload/t_cover_big/<id>.jpg
     created_at       TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX idx_game_match ON game(normalized_title, release_year);
 
 -- ------------------------------------------------------------
--- 4. GAME <-> SOURCE LINK  (the heart of the extensibility design)
+-- 4. GAME <-> SOURCE LINK
 --    One row per (canonical game, source). Stores that source's
---    native id PLUS how you arrived at the match and how sure you are.
+--    native id PLUS how we arrived at the match and how sure we are.
 -- ------------------------------------------------------------
 CREATE TABLE game_source_ref (
     ref_id           INTEGER PRIMARY KEY,
@@ -97,12 +96,12 @@ CREATE INDEX idx_score_game ON game_score(game_id, source_id);
 
 -- ------------------------------------------------------------
 -- 6. ATTRIBUTES  (generic tags: genre, platform, theme, game_mode,
---    player_perspective, ... — adding a new KIND needs no schema change)
+--    player_perspective, ... - adding a new KIND needs no schema change)
 -- ------------------------------------------------------------
 CREATE TABLE attribute (
     attribute_id INTEGER PRIMARY KEY,
     kind         TEXT NOT NULL,           -- 'genre','platform','theme','game_mode',
-                                          --   'player_perspective','franchise','keyword'
+                                          --    'player_perspective','franchise','keyword'
     name         TEXT NOT NULL,
     UNIQUE (kind, name)
 );
@@ -115,7 +114,7 @@ CREATE TABLE game_attribute (
 CREATE INDEX idx_game_attribute_game ON game_attribute(game_id);
 
 -- ------------------------------------------------------------
--- 6b. COMPANIES  (developer / publisher — a label plus a role)
+-- 7. COMPANIES  (developer / publisher - a label plus a role)
 -- ------------------------------------------------------------
 CREATE TABLE company (
     company_id INTEGER PRIMARY KEY,
@@ -131,9 +130,9 @@ CREATE TABLE game_company (
 CREATE INDEX idx_game_company_game ON game_company(game_id);
 
 -- ------------------------------------------------------------
--- 7. YOUR LIBRARY / BACKLOG  (the tracking half of the project)
---    Single-user for v1. If it ever goes multi-user, add a `user`
---    table and a user_id column here; nothing else has to change.
+-- 8. USER LIBRARY / BACKLOG  (the stretch tracking half of the project)
+--    Single-user for now. If it ever goes multi-user, add a `user`
+--    table and a user_id column here.
 -- ------------------------------------------------------------
 CREATE TABLE user_game (
     user_game_id INTEGER PRIMARY KEY,
@@ -149,7 +148,7 @@ CREATE TABLE user_game (
 );
 
 -- ------------------------------------------------------------
--- Seed the sources you're starting with
+-- Sources we're starting with
 -- ------------------------------------------------------------
 INSERT INTO source (name, display_name, base_url) VALUES
     ('igdb',       'IGDB',       'https://api.igdb.com/v4'),

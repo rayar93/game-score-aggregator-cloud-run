@@ -2,12 +2,11 @@
 """
 build_dev_db.py - build the local dev database from the committed schema + starter data.
 
-It reads the .sql files as UTF-8 explicitly, because on Windows open()/read_text() crash 
+It reads the .sql files as UTF-8 explicitly, because on Windows open()/read_text() crash
 on accented game titles. Run from anywhere:
 
     python tools/build_dev_db.py            # build game_library.db (errors if it exists)
     python tools/build_dev_db.py --force    # delete and rebuild it
-    
 """
 import os
 import sqlite3
