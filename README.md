@@ -28,11 +28,11 @@ ML-based recommendations from per-game metadata.
 ```
 team-AAA-summer2026/
 ├── README.md
-├── requirements.txt        # you must build your own venv from this
+├── requirements.txt        # install into your venv: pip install -r requirements.txt
 ├── .gitignore
 ├── .env.example            # template; copy to a local .env and add secret keys
-├── schema.sql              # database schema (SQLite now; to be ported to Posgres)
-├── sample_data.sql         # whole .db won't fit on GitHub - workaround until we move to cloud
+├── schema.sql              # database schema (SQLite now; to be ported to Postgres)
+├── sample_data.sql         # small dev seed to develop against
 ├── db.py                   # shared data-access layer
 ├── rank.py                 # a CLI tool demonstrating how to call ranked_games
 ├── web/                    # Cloud Run service
@@ -42,6 +42,7 @@ team-AAA-summer2026/
 │   ├── igdb.py
 │   └── steam.py
 └── tools/
+    ├── export_sample.py    # regenerates sample_data.sql from the full DB
     └── build_dev_db.py     # builds a small sample database
 ```
 
