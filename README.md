@@ -32,13 +32,17 @@ team-AAA-summer2026/
 ├── .gitignore
 ├── .env.example            # template; copy to a local .env and add secret keys
 ├── schema.sql              # database schema (SQLite now; to be ported to Posgres)
+├── sample_data.sql         # whole .db won't fit on GitHub - workaround until we move to cloud
 ├── db.py                   # shared data-access layer
+├── rank.py                 # a CLI tool demonstrating how to call ranked_games
 ├── web/                    # Cloud Run service
 │   ├── app.py              # Flask app
 │   └── templates/          # Jinja2 pages
-└── ingest/                 # Cloud Run Job
-    ├── igdb.py
-    └── steam.py
+├── ingest/                 # Cloud Run Job
+│   ├── igdb.py
+│   └── steam.py
+└── tools/
+    └── build_dev_db.py     # builds a small sample database
 ```
 
 ## Local setup
@@ -48,25 +52,22 @@ team-AAA-summer2026/
 python -m venv .venv
 
 # 2. activate it
-#   Windows (PowerShell):  .\.venv\Scripts\Activate.ps1
-#   macOS/Linux:           source .venv/bin/activate
+.\.venv\Scripts\Activate.ps1 # Windows
+source .venv/bin/activate    # macOS/Linux
 
 # 3. install dependencies
 pip install -r requirements.txt
 
 # 4. build a local dev database (real games to develop against, NO keys needed)
-sqlite3 dev.db < schema.sql
-sqlite3 dev.db < sample_data.sql
+python tools/build_dev_db.py
 
 # 5. (INGESTION ONLY) only if you'll run the scrapers, create your .env and add keys:
-#   copy .env.example .env      (Windows)
-#   cp   .env.example .env      (macOS/Linux)
+copy .env.example .env      # Windows
+cp   .env.example .env      # macOS/Linux
 ```
 
 The `.venv/` folder and your real `.env` are **git-ignored** - they stay on your
 machine. Never commit the database file, the venv, or any API keys.
-
-## Secrets
 
 ## Secrets
 
