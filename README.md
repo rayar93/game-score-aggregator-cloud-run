@@ -16,6 +16,10 @@ The whole application runs on **Cloud Run** as Docker containers:
 - **Web service** (`web/` + `db.py`) - a containerized Flask app that serves the
   frontend and all search/filter/ranking queries. The only part that talks to the
   database, and all database access happens in the cloud.
+
+  Building the web app? Start with `rank.py` - it's a worked example of every
+  db.py call you'll need (get_connection, ranked_games, genres_for,
+  attributes_for), so you don't have to read the whole data layer.
 - **Cloud SQL (PostgreSQL)** - the cloud-hosted relational database.
 - **Ingestion job** (`ingest/` + `db.py`) - the data-fetching scripts, run as a
   Cloud Run job on a Cloud Scheduler trigger to keep the catalog current.
