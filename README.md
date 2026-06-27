@@ -18,7 +18,7 @@ The whole application runs on **Cloud Run** as Docker containers:
   database, and all database access happens in the cloud.
 
   Building the web app? Start with `rank.py` - it's a worked example of every
-  db.py call you'll need (get_connection, ranked_games, genres_for,
+  `db.py` call you'll need (get_connection, ranked_games, genres_for,
   attributes_for), so you don't have to read the whole data layer.
 - **Cloud SQL (PostgreSQL)** - the cloud-hosted relational database.
 - **Ingestion job** (`ingest/` + `db.py`) - the data-fetching scripts, run as a

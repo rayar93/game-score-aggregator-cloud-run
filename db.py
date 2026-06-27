@@ -14,7 +14,7 @@ What's in here:
                          ensure_source, get_source_id
     Reading data         (web app) find_game_by_source, attributes_for, genres_for,
                          all_genres, unsorted_games, games_by_status
-    Ranking              (web app) ranked_games  (the critic/user blend - the main query)
+    Ranking              (web app) ranked_games (the critic/user blend - the main query)
 """
 
 import os
@@ -286,7 +286,8 @@ def find_game_by_source(conn, source_name, source_native_id):
 
 def ranked_games(conn, min_critic_count=0, min_user_count=0, limit=50,
                  steam_only=False, sort_by="score", min_score=0,
-                 exclude_genres=None, min_critic_score=0, min_user_score=0):
+                 exclude_genres=None, min_critic_score=0, min_user_score=0,
+                 title_search=None):
     """
     Rank games by a critic/user blend.
 
@@ -334,6 +335,12 @@ def ranked_games(conn, min_critic_count=0, min_user_count=0, limit=50,
     both spellings (e.g. "RPG" and "Role-playing (RPG)"); all_genres() shows what
     spellings actually exist.
 
+    title_search is an optional case-insensitive substring match on the title:
+    only games whose canonical_title contains it are returned. Because this filters
+    the ranked results, it only finds games that already have BOTH scores - it is a
+    "search for a scored game", not a general "does this game exist" lookup. We'll 
+    write search_games later.
+
     FUTURE (when OpenCritic lands): OpenCritic + IGDB critic become count-weighted
     together as 2/3 of the critic side, with Metacritic a fixed 1/3 - i.e. replace
     the simple critic average below with (2/3)*weighted(oc,igdb) + (1/3)*metacritic.
@@ -365,6 +372,17 @@ def ranked_games(conn, min_critic_count=0, min_user_count=0, limit=50,
                             AND ax.kind IN {_GENRE_KINDS_SQL}
                             AND LOWER(ax.name) IN ({",".join(ex_keys)}))
         """
+
+    # title_search: case-insensitive substring match on the canonical title.
+    # LIMITATION: SQLite LOWER() only folds ASCII, so accented titles don't match
+    # a plain-ASCII query (searching "okami" misses "Okami" with a macron; "kami"
+    # finds it). Real fuzzy/accent-insensitive search is a Postgres unaccent +
+    # trigram job for later.
+    title_clause = ""
+    if title_search:
+        params["title_q"] = f"%{title_search.lower()}%"
+        title_clause = "AND LOWER(canonical_title) LIKE :title_q"
+
     query = f"""
         WITH pivot AS (
             SELECT g.game_id, g.canonical_title, g.release_year,
@@ -415,6 +433,7 @@ def ranked_games(conn, min_critic_count=0, min_user_count=0, limit=50,
           AND user_score >= :minuserscore
           {steam_clause}
           {exclude_clause}
+          {title_clause}
         {order_clause}
         {limit_clause}
     """

@@ -23,6 +23,9 @@ Usage:
     python rank.py 100 5 50                 # also require >= 50 combined user ratings
     python rank.py 100 5 50 --steam         # ...and only games with a Steam store page
 
+    python rank.py --search "hades"         # find a game by name and show its score
+    python rank.py --search "civ" 50 0      # ...with no critic-review floor, if it's hiding
+
     python rank.py 1000 5 --steam           # top 1000 Steam-page games
     python rank.py 1000 5 --out top.txt     # write to a UTF-8 file instead of the terminal
 
@@ -43,6 +46,10 @@ Args:
                          this apparent mismatch.
     [min_user_ratings]   minimum combined user rating count, Steam + IGDB (default: 0)
 
+    --search "name"      show only games whose title contains "name" (case-insensitive).
+                         Only finds games that already have both scores; if a game
+                         you expect is missing, try a lower critic-review floor, e.g.
+                         --search "name" 50 0
     --steam              restrict to games with a Steam store page
     --popular            sort by combined user rating count instead of blended score
     --min-score N        exclude games whose final blended score is below N
@@ -83,6 +90,7 @@ def main():
         sys.exit(0)
 
     out_path      = take_value("--out")
+    search_query  = take_value("--search")
     min_score_str = take_value("--min-score")
     min_score     = float(min_score_str) if min_score_str is not None else 0
     min_cscore_str = take_value("--min-critic-score")
@@ -94,7 +102,8 @@ def main():
 
     # First collect every value already claimed by a flag.
     # The remaining numbers are assumed to be positionals.
-    skip = {v for v in (out_path, min_score_str, min_cscore_str, min_uscore_str, exclude_str) if v is not None}
+    skip = {v for v in (out_path, search_query, min_score_str, min_cscore_str,
+                        min_uscore_str, exclude_str) if v is not None}
     nums = [a for a in args if a not in skip and a.lstrip("-").isdigit()]
 
     limit       = int(nums[0]) if len(nums) > 0 else 50
@@ -106,12 +115,14 @@ def main():
                         min_user_count=min_users, limit=limit,
                         steam_only=steam_only, sort_by=sort_by, min_score=min_score,
                         exclude_genres=exclude_genres, min_critic_score=min_critic_score,
-                        min_user_score=min_user_score)
+                        min_user_score=min_user_score, title_search=search_query)
 
     out = open(out_path, "w", encoding="utf-8") if out_path else sys.stdout
 
     sort_label = "popularity (most-rated)" if sort_by == "popularity" else "blended score"
     notes = [f"critic >= {min_critics} reviews", f"user >= {min_users} ratings"]
+    if search_query:
+        notes.append(f'matching "{search_query}"')
     if min_score:
         notes.append(f"score >= {min_score:g}")
     if min_critic_score:
