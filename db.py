@@ -18,47 +18,49 @@ What's in here:
 """
 
 import os
-import sqlite3
+import psycopg
+from psycopg.rows import dict_row
 from pathlib import Path
 
-# Anchor paths to THIS file's directory (the repo root, where db.py lives) so the
-# ingest/ scripts resolve the schema and DB identically no matter which folder
-# they're launched from. The DB path is overridable via the GAMEDB_DB env var.
+# Cloud Run supplies real env variables, so this is a no-op there.
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).resolve().parent / ".env")
+except ImportError:
+    pass
+
 _HERE = Path(__file__).resolve().parent
-DB_PATH = Path(os.environ.get("GAMEDB_DB", _HERE / "game_library.db"))
 SCHEMA_PATH = _HERE / "schema.sql"
 
 
 # ---------------------------------------------------------------------------
 # Connection + setup
 # ---------------------------------------------------------------------------
-def get_connection(db_path=DB_PATH):
-    """Open a connection. row_factory makes rows act like dicts (row['title'])."""
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")  # SQLite needs this EVERY connection
-    return conn
+def get_connection():
+    """Open a Postgres connection with dict-style rows (row['title'])."""
+    return psycopg.connect(
+        host=os.environ.get("DB_HOST", "127.0.0.1"),
+        port=os.environ.get("DB_PORT", "5432"),
+        dbname=os.environ.get("DB_NAME", "gamedb"),
+        user=os.environ.get("DB_USER", "postgres"),
+        password=os.environ.get("DB_PASSWORD", ""),
+        row_factory=dict_row,
+    )
 
 
-def init_db(db_path=DB_PATH, schema_path=SCHEMA_PATH):
-    """Create all tables by running the schema file. Run once per database."""
-    conn = get_connection(db_path)
-    conn.executescript(Path(schema_path).read_text(encoding="utf-8"))
-    conn.commit()
-    conn.close()
+def init_db(schema_path=SCHEMA_PATH):
+    """Create all tables by running schema.sql. Run once per database."""
+    sql = Path(schema_path).read_text(encoding="utf-8")
+    with get_connection() as conn:
+        conn.execute(sql)
+        conn.commit()
 
 
 def ensure_schema(conn, schema_path=SCHEMA_PATH):
-    """
-    Create the tables if they don't exist yet. Safe to call on every run - if the
-    schema is already there it does nothing, so tools like igdb.py can call it at
-    startup and stop caring whether `python db.py` was run first.
-    """
-    has_tables = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='source'"
-    ).fetchone()
-    if not has_tables:
-        conn.executescript(Path(schema_path).read_text(encoding="utf-8"))
+    """Create the tables if they don't exist yet. Safe to call on every run."""
+    exists = conn.execute("SELECT to_regclass('public.source') AS t").fetchone()["t'"]
+    if exists is None:
+        conn.execute(Path(schema_path).read_text(encoding="utf-8"))
         conn.commit()
 
 
@@ -66,14 +68,14 @@ def ensure_schema(conn, schema_path=SCHEMA_PATH):
 # Writing data
 # ---------------------------------------------------------------------------
 def get_source_id(conn, name):
-    row = conn.execute("SELECT source_id FROM source WHERE name = ?", (name,)).fetchone()
+    row = conn.execute("SELECT source_id FROM source WHERE name = %s", (name,)).fetchone()
     return row["source_id"] if row else None
 
 
 def ensure_source(conn, name, display_name=None, base_url=None):
     """Create a source row if it doesn't exist yet (e.g. 'metacritic' on a DB built before it was seeded)."""
     conn.execute(
-        "INSERT OR IGNORE INTO source (name, display_name, base_url) VALUES (?, ?, ?)",
+        "%sINSERT ... ON CONFLICT DO NOTHING INTO source (name, display_name, base_url) VALUES (%s, %s, %s)",
         (name, display_name or name.title(), base_url),
     )
     conn.commit()
@@ -82,14 +84,15 @@ def ensure_source(conn, name, display_name=None, base_url=None):
 def add_game(conn, canonical_title, normalized_title,
              release_year=None, release_date=None, summary=None, cover_image_id=None):
     """Insert a canonical game and return its new game_id."""
-    cur = conn.execute(
+    row = conn.execute(
         """INSERT INTO game (canonical_title, normalized_title,
                              release_year, release_date, summary, cover_image_id)
-           VALUES (?, ?, ?, ?, ?, ?)""",
+           VALUES (%s, %s, %s, %s, %s, %s)
+           RETURNING game_id""",
         (canonical_title, normalized_title, release_year, release_date, summary, cover_image_id),
-    )
+    ).fetchone()
     conn.commit()
-    return cur.lastrowid
+    return row["game_id"]
 
 
 def add_score(conn, game_id, source_name, score_type, score_value, sample_count=None):
@@ -101,11 +104,11 @@ def add_score(conn, game_id, source_name, score_type, score_value, sample_count=
     """
     conn.execute(
         """INSERT INTO game_score (game_id, source_id, score_type, score_value, sample_count)
-           VALUES (?, ?, ?, ?, ?)
+           VALUES (%s, %s, %s, %s, %s)
            ON CONFLICT(game_id, source_id, score_type) DO UPDATE
                SET score_value = excluded.score_value,
                    sample_count = excluded.sample_count,
-                   captured_at = datetime('now')""",
+                   captured_at = now()""",
         (game_id, get_source_id(conn, source_name), score_type, score_value, sample_count),
     )
     conn.commit()
@@ -119,10 +122,10 @@ def set_status(conn, game_id, status):
     """
     conn.execute(
         """INSERT INTO user_game (game_id, status)
-           VALUES (?, ?)
+           VALUES (%s, %s)
            ON CONFLICT(game_id) DO UPDATE
                SET status = excluded.status,
-                   updated_at = datetime('now')""",
+                   updated_at = now()""",
         (game_id, status),
     )
     conn.commit()
@@ -132,7 +135,7 @@ def stage_raw(conn, source_name, source_native_id, endpoint, http_status, payloa
     """Drop a raw API response into the staging table before reconciliation."""
     conn.execute(
         """INSERT INTO raw_fetch (source_id, source_native_id, endpoint, http_status, payload)
-           VALUES (?, ?, ?, ?, ?)""",
+           VALUES (%s, %s, %s, %s, %s)""",
         (get_source_id(conn, source_name), source_native_id, endpoint, http_status, payload),
     )
     conn.commit()
@@ -147,7 +150,7 @@ def link_source(conn, game_id, source_name, source_native_id,
     conn.execute(
         """INSERT INTO game_source_ref
                (game_id, source_id, source_native_id, source_url, match_method, match_confidence)
-           VALUES (?, ?, ?, ?, ?, ?)
+           VALUES (%s, %s, %s, %s, %s, %s)
            ON CONFLICT DO NOTHING""",
         (game_id, get_source_id(conn, source_name), source_native_id,
          source_url, match_method, match_confidence),
@@ -162,12 +165,12 @@ def add_attributes(conn, game_id, kind, names):
     to a game. Re-running won't create duplicates.
     """
     for name in names:
-        conn.execute("INSERT OR IGNORE INTO attribute (kind, name) VALUES (?, ?)", (kind, name))
+        conn.execute("%sINSERT ... ON CONFLICT DO NOTHING INTO attribute (kind, name) VALUES (%s, %s)", (kind, name))
         aid = conn.execute(
-            "SELECT attribute_id FROM attribute WHERE kind = ? AND name = ?", (kind, name)
+            "SELECT attribute_id FROM attribute WHERE kind = %s AND name = %s", (kind, name)
         ).fetchone()["attribute_id"]
         conn.execute(
-            "INSERT OR IGNORE INTO game_attribute (game_id, attribute_id) VALUES (?, ?)",
+            "%sINSERT ... ON CONFLICT DO NOTHING INTO game_attribute (game_id, attribute_id) VALUES (%s, %s)",
             (game_id, aid),
         )
     conn.commit()
@@ -179,10 +182,10 @@ def add_companies(conn, game_id, companies):
     Re-running won't create duplicates.
     """
     for name, role in companies:
-        conn.execute("INSERT OR IGNORE INTO company (name) VALUES (?)", (name,))
-        cid = conn.execute("SELECT company_id FROM company WHERE name = ?", (name,)).fetchone()["company_id"]
+        conn.execute("%sINSERT ... ON CONFLICT DO NOTHING INTO company (name) VALUES (%s)", (name,))
+        cid = conn.execute("SELECT company_id FROM company WHERE name = %s", (name,)).fetchone()["company_id"]
         conn.execute(
-            "INSERT OR IGNORE INTO game_company (game_id, company_id, role) VALUES (?, ?, ?)",
+            "%sINSERT ... ON CONFLICT DO NOTHING INTO game_company (game_id, company_id, role) VALUES (%s, %s, %s)",
             (game_id, cid, role),
         )
     conn.commit()
@@ -193,7 +196,7 @@ def attributes_for(conn, game_id, kind):
     return [r["name"] for r in conn.execute(
         """SELECT a.name FROM game_attribute ga
            JOIN attribute a ON a.attribute_id = ga.attribute_id
-           WHERE ga.game_id = ? AND a.kind = ? ORDER BY a.name""",
+           WHERE ga.game_id = %s AND a.kind = %s ORDER BY a.name""",
         (game_id, kind),
     )]
 
@@ -211,7 +214,7 @@ def genres_for(conn, game_id):
     return [r["name"] for r in conn.execute(
         f"""SELECT DISTINCT a.name FROM game_attribute ga
             JOIN attribute a ON a.attribute_id = ga.attribute_id
-            WHERE ga.game_id = ? AND a.kind IN {_GENRE_KINDS_SQL}
+            WHERE ga.game_id = %s AND a.kind IN {_GENRE_KINDS_SQL}
             ORDER BY a.name""",
         (game_id,),
     )]
@@ -239,9 +242,9 @@ def update_game(conn, game_id, canonical_title, normalized_title,
     """Refresh a canonical game's fields - used when re-importing a game we already have."""
     conn.execute(
         """UPDATE game
-           SET canonical_title = ?, normalized_title = ?, release_year = ?,
-               release_date = ?, summary = ?, cover_image_id = ?, updated_at = datetime('now')
-           WHERE game_id = ?""",
+           SET canonical_title = %s, normalized_title = %s, release_year = %s,
+               release_date = %s, summary = %s, cover_image_id = %s, updated_at = now()
+           WHERE game_id = %s""",
         (canonical_title, normalized_title, release_year, release_date, summary, cover_image_id, game_id),
     )
     conn.commit()
@@ -267,7 +270,7 @@ def games_by_status(conn, status):
         SELECT g.game_id, g.canonical_title, g.release_year, ug.user_rating
         FROM user_game ug
         JOIN game g ON g.game_id = ug.game_id
-        WHERE ug.status = ?
+        WHERE ug.status = %s
         ORDER BY g.canonical_title
     """, (status,)).fetchall()
 
@@ -278,7 +281,7 @@ def find_game_by_source(conn, source_name, source_native_id):
         """SELECT gsr.game_id
            FROM game_source_ref gsr
            JOIN source s ON s.source_id = gsr.source_id
-           WHERE s.name = ? AND gsr.source_native_id = ?""",
+           WHERE s.name = %s AND gsr.source_native_id = %s""",
         (source_name, str(source_native_id)),
     ).fetchone()
     return row["game_id"] if row else None
@@ -351,7 +354,7 @@ def ranked_games(conn, min_critic_count=0, min_user_count=0, limit=50,
     order_clause = ("ORDER BY user_n DESC, final_score DESC"
                     if sort_by == "popularity"
                     else "ORDER BY final_score DESC, user_n DESC")
-    limit_clause = "LIMIT :lim" if limit else ""
+    limit_clause = "LIMIT %(lim)s" if limit else ""
     steam_clause = ("""
           AND EXISTS (SELECT 1 FROM game_source_ref gsr
                       JOIN source s2 ON s2.source_id = gsr.source_id
@@ -364,7 +367,7 @@ def ranked_games(conn, min_critic_count=0, min_user_count=0, limit=50,
         for i, name in enumerate(exclude_genres):
             key = f"exg{i}"
             params[key] = name.lower()
-            ex_keys.append(f":{key}")
+            ex_keys.append(f"%({key})s")
         exclude_clause = f"""
           AND NOT EXISTS (SELECT 1 FROM game_attribute gax
                           JOIN attribute ax ON ax.attribute_id = gax.attribute_id
@@ -374,14 +377,12 @@ def ranked_games(conn, min_critic_count=0, min_user_count=0, limit=50,
         """
 
     # title_search: case-insensitive substring match on the canonical title.
-    # LIMITATION: SQLite LOWER() only folds ASCII, so accented titles don't match
-    # a plain-ASCII query (searching "okami" misses "Okami" with a macron; "kami"
-    # finds it). Real fuzzy/accent-insensitive search is a Postgres unaccent +
-    # trigram job for later.
+    # LIMITATION: doesn't work on accent folding. Postgres fix is unaccent() + 
+    # pg_trgm, deferred to a later spring.
     title_clause = ""
     if title_search:
         params["title_q"] = f"%{title_search.lower()}%"
-        title_clause = "AND LOWER(canonical_title) LIKE :title_q"
+        title_clause = "AND LOWER(canonical_title) LIKE %(title_q)s"
 
     query = f"""
         WITH pivot AS (
@@ -401,7 +402,7 @@ def ranked_games(conn, min_critic_count=0, min_user_count=0, limit=50,
         calc AS (
             SELECT *,
                 -- IGDB critic only counts toward the critic average if it clears the threshold
-                CASE WHEN igdb_critic IS NOT NULL AND COALESCE(igdb_critic_n, 0) >= :minc
+                CASE WHEN igdb_critic IS NOT NULL AND COALESCE(igdb_critic_n, 0) >= %(minc)s
                      THEN igdb_critic END AS igdb_critic_ok,
                 (COALESCE(igdb_user * igdb_user_n, 0) + COALESCE(steam_user * steam_user_n, 0)) AS user_num,
                 (COALESCE(CASE WHEN igdb_user  IS NOT NULL THEN igdb_user_n  END, 0)
@@ -427,10 +428,10 @@ def ranked_games(conn, min_critic_count=0, min_user_count=0, limit=50,
                (critic_score + user_score) / 2.0 AS final_score
         FROM scored
         WHERE critic_score IS NOT NULL AND user_score IS NOT NULL
-          AND user_den >= :minu
-          AND (critic_score + user_score) / 2.0 >= :minscore
-          AND critic_score >= :mincritscore
-          AND user_score >= :minuserscore
+          AND user_den >= %(minu)s
+          AND (critic_score + user_score) / 2.0 >= %(minscore)s
+          AND critic_score >= %(mincritscore)s
+          AND user_score >= %(minuserscore)s
           {steam_clause}
           {exclude_clause}
           {title_clause}
@@ -447,12 +448,13 @@ def ranked_games(conn, min_critic_count=0, min_user_count=0, limit=50,
 # It will NOT wipe an existing database or seed any demo data.
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    if DB_PATH.exists():
-        conn = get_connection()
-        n = conn.execute("SELECT COUNT(*) c FROM game").fetchone()["c"]
+    conn = get_connection()
+    exists = conn.execute("SELECT to_regclass('public.source') AS t").fetchone()["t"]
+    if exists is None:
         conn.close()
-        print(f"{DB_PATH} already exists ({n} games). Leaving it untouched.")
-        print("Delete it manually if you want to start fresh.")
-    else:
         init_db()
-        print(f"Created {DB_PATH} with empty tables. Import games with: python ingest/igdb.py --all 200")
+        print("Created tables from schema.sql")
+    else:
+        n = conn.execute("SELECT COUNT(*) AS c FROM game").fetchone()["c"]
+        conn.close()
+        print(f"Database already has tables ({n} games). Leaving it untouched.")
