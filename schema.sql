@@ -32,7 +32,7 @@ CREATE TABLE raw_fetch (
     endpoint         TEXT,               -- which API call produced this row
     http_status      INTEGER,
     payload          JSONB,               -- query later with -> / ->>
-    fetched_at       TIMESTAMPZ NOT NULL DEFAULT now()
+    fetched_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_raw_fetch_lookup ON raw_fetch(source_id, source_native_id);
 
@@ -49,8 +49,8 @@ CREATE TABLE game (
     summary          TEXT,
     cover_image_id   TEXT,                -- IGDB cover art id; build a URL from it for the UI:
                                           --    https://images.igdb.com/igdb/image/upload/t_cover_big/<id>.jpg
-    created_at       TIMESTAMPZ NOT NULL DEFAULT now(),
-    updated_at       TIMESTAMPZ NOT NULL DEFAULT now()
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_game_match ON game(normalized_title, release_year);
 
@@ -67,7 +67,7 @@ CREATE TABLE game_source_ref (
     source_url       TEXT,
     match_method     TEXT,                -- 'igdb_external', 'title+year', 'manual'
     match_confidence DOUBLE PRECISION,                -- 0.0-1.0; use 1.0 for a hard external ID like IGDB->Steam
-    linked_at        TIMESTAMPZ NOT NULL DEFAULT now(),
+    linked_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (source_id, source_native_id), -- a given source record maps to AT MOST one canonical game
     UNIQUE (game_id, source_id)           -- a canonical game has AT MOST one record per source
 );
@@ -141,8 +141,8 @@ CREATE TABLE user_game (
     user_rating  INTEGER CHECK (user_rating BETWEEN 1 AND 10),
     hours_played DOUBLE PRECISION,
     notes        TEXT,
-    added_at     TIMESTAMPZ NOT NULL DEFAULT now(),
-    updated_at   TIMESTAMPZ NOT NULL DEFAULT now()
+    added_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- ------------------------------------------------------------
