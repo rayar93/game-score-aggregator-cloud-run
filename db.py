@@ -58,7 +58,7 @@ def init_db(schema_path=SCHEMA_PATH):
 
 def ensure_schema(conn, schema_path=SCHEMA_PATH):
     """Create the tables if they don't exist yet. Safe to call on every run."""
-    exists = conn.execute("SELECT to_regclass('public.source') AS t").fetchone()["t'"]
+    exists = conn.execute("SELECT to_regclass('public.source') AS t").fetchone()["t"]
     if exists is None:
         conn.execute(Path(schema_path).read_text(encoding="utf-8"))
         conn.commit()
@@ -75,7 +75,7 @@ def get_source_id(conn, name):
 def ensure_source(conn, name, display_name=None, base_url=None):
     """Create a source row if it doesn't exist yet (e.g. 'metacritic' on a DB built before it was seeded)."""
     conn.execute(
-        "%sINSERT ... ON CONFLICT DO NOTHING INTO source (name, display_name, base_url) VALUES (%s, %s, %s)",
+        "INSERT INTO source (name, display_name, base_url) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
         (name, display_name or name.title(), base_url),
     )
     conn.commit()
@@ -165,12 +165,12 @@ def add_attributes(conn, game_id, kind, names):
     to a game. Re-running won't create duplicates.
     """
     for name in names:
-        conn.execute("%sINSERT ... ON CONFLICT DO NOTHING INTO attribute (kind, name) VALUES (%s, %s)", (kind, name))
+        conn.execute("INSERT INTO attribute (kind, name) VALUES (%s, %s) ON CONFLICT DO NOTHING", (kind, name))
         aid = conn.execute(
             "SELECT attribute_id FROM attribute WHERE kind = %s AND name = %s", (kind, name)
         ).fetchone()["attribute_id"]
         conn.execute(
-            "%sINSERT ... ON CONFLICT DO NOTHING INTO game_attribute (game_id, attribute_id) VALUES (%s, %s)",
+            "INSERT INTO game_attribute (game_id, attribute_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
             (game_id, aid),
         )
     conn.commit()
@@ -182,10 +182,10 @@ def add_companies(conn, game_id, companies):
     Re-running won't create duplicates.
     """
     for name, role in companies:
-        conn.execute("%sINSERT ... ON CONFLICT DO NOTHING INTO company (name) VALUES (%s)", (name,))
+        conn.execute("INSERT INTO company (name) VALUES (%s) ON CONFLICT DO NOTHING", (name,))
         cid = conn.execute("SELECT company_id FROM company WHERE name = %s", (name,)).fetchone()["company_id"]
         conn.execute(
-            "%sINSERT ... ON CONFLICT DO NOTHING INTO game_company (game_id, company_id, role) VALUES (%s, %s, %s)",
+            "INSERT INTO game_company (game_id, company_id, role) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
             (game_id, cid, role),
         )
     conn.commit()
