@@ -1,4 +1,5 @@
 # Team AAA - Summer 2026 - Game database
+CS 3537 Cloud Computing - **Team AAA**: Alan Ray, Anthony Samson, Aaron White.
 
 A videogame database and discovery tool that's more searchable, filterable, and
 complete than existing sites. It ingests game data and ratings from **IGDB**,
@@ -6,8 +7,6 @@ complete than existing sites. It ingests game data and ratings from **IGDB**,
 database, then blends critic and user scores with user-configurable weighting,
 letting users search and filter by genre, platform, developer, publisher,
 release year, and minimum rating counts.
-
-CS 3537 Cloud Computing - **Team AAA**: Alan Ray, Anthony Samson, Aaron White.
 
 ## Architecture
 
@@ -20,7 +19,8 @@ The whole application runs on **Cloud Run** as Docker containers:
   Building the web app? Start with `rank.py` - it's a worked example of every
   `db.py` call you'll need (get_connection, ranked_games, genres_for,
   attributes_for), so you don't have to read the whole data layer.
-- **Cloud SQL (PostgreSQL)** - the cloud-hosted relational database.
+- **Cloud SQL (PostgreSQL)** - the cloud-hosted relational database. There is one
+  shared instance; everyone develops against it directly (see below).
 - **Ingestion job** (`ingest/` + `db.py`) - the data-fetching scripts, run as a
   Cloud Run job on a Cloud Scheduler trigger to keep the catalog current.
 
@@ -28,64 +28,88 @@ Stretch goals: user accounts (Identity Platform) + personal ratings, and
 ML-based recommendations from per-game metadata.
 
 ## Repository layout
-
 ```
 team-AAA-summer2026/
 ├── README.md
-├── requirements.txt        # install into your venv: pip install -r requirements.txt
+├── requirements.txt           # install into your venv: pip install -r requirements.txt
 ├── .gitignore
-├── .env.example            # template; copy to a local .env and add secret keys
-├── schema.sql              # database schema (SQLite now; to be ported to Postgres)
-├── sample_data.sql         # small dev seed to develop against
-├── db.py                   # shared data-access layer
-├── rank.py                 # a CLI tool demonstrating how to call ranked_games
-├── web/                    # Cloud Run service
-│   ├── app.py              # Flask app
-│   └── templates/          # Jinja2 pages
-├── ingest/                 # Cloud Run Job
+├── .env.example               # template; copy to a local .env (see Setup)
+├── schema.sql                 # database schema (PostgreSQL)
+├── db.py                      # shared data-access layer
+├── rank.py                    # a CLI tool demonstrating how to call ranked_games
+├── web/                       # Cloud Run service
+│   ├── app.py                 # Flask app
+│   └── templates/             # Jinja2 pages
+├── ingest/                    # Cloud Run Job - WRITES to the shared DB; be careful
 │   ├── igdb.py
 │   └── steam.py
 └── tools/
-    ├── export_sample.py    # regenerates sample_data.sql from the full DB
-    └── build_dev_db.py     # builds a small sample database
+    └── migrate_to_postgres.py # one-time; loaded the SQLite scrape into Cloud SQL
 ```
 
-## Local setup
+## Setup
+
+We develop directly against the shared **Cloud SQL** instance through the Cloud
+SQL Auth Proxy - a small local program that opens a secure tunnel so your code can
+reach the cloud database at `127.0.0.1:5432`. Everyone needs it running.
 
 ```bash
-# 1. clone, then from the repo folder:
+# 1. clone, then from the repo folder, make a venv:
 python -m venv .venv
 
 # 2. activate it
-.\.venv\Scripts\Activate.ps1 # Windows
-source .venv/bin/activate    # macOS/Linux
+.\.venv\Scripts\Activate.ps1   # Windows (PowerShell)
+source .venv/bin/activate      # macOS/Linux
 
 # 3. install dependencies
 pip install -r requirements.txt
 
-# 4. build a local dev database (real games to develop against, NO keys needed)
-python tools/build_dev_db.py
+# 4. authenticate for the proxy (one time, opens a browser)
+gcloud auth application-default login
 
-# 5. (INGESTION ONLY) only if you'll run the scrapers, create your .env and add keys:
-copy .env.example .env      # Windows
-cp   .env.example .env      # macOS/Linux
+# 5. create your .env from the template, then get the DB password from Alan
+copy .env.example .env         # Windows
+cp   .env.example .env         # macOS/Linux
 ```
 
-The `.venv/` folder and your real `.env` are **git-ignored** - they stay on your
-machine. Never commit the database file, the venv, or any API keys.
+### Running the Auth Proxy
+
+Download the proxy binary from
+https://github.com/GoogleCloudPlatform/cloud-sql-proxy/releases (or install it via
+`gcloud components install cloud-sql-proxy`). Then, in its **own terminal that you
+leave open**, start it with our instance connection name: 
+`cloud-sql-proxy rayar-cs3537-2026:us-east1:gamedb-pg`
+
+It should print that it's listening on `127.0.0.1:5432` and then sit quietly -
+that's it working. Leave that window open the whole time you're developing. In a
+second terminal (venv active), you can now run the app or `python rank.py 20` and
+it hits the real database.
 
 ## Secrets
 
 Two kinds, needed by different parts:
 
-- API keys - Twitch client id/secret, which ARE your IGDB credentials (IGDB
-  authenticates through Twitch; Steam needs no key). Needed ONLY to run the
-  ingestion scripts (ingest/). The web app and local development don't need them.
-- Database credentials - the Cloud SQL host/user/password. Needed by whatever
-  connects to the cloud database (the deployed web service, and ingestion when
-  pointed at Cloud SQL). NOT needed for local dev, which runs against the dev DB
-  built above.
+- **Database credentials** - the Cloud SQL password, in your `.env`. Needed by
+  **anything that connects to the database, which now includes local development**,
+  since we develop against the shared instance. Get the password from Alan; don't
+  commit it.
+- **API keys** - Twitch client id/secret, which are also your IGDB credentials (IGDB
+  authenticates through Twitch; Steam needs no key). Needed **only** to run the
+  ingestion scripts (`ingest/`). The web app doesn't touch them.
 
-Both live in a local, git-ignored .env during development and in Cloud Run
-environment variables when deployed. .env.example lists the variable names with
-no real values. Never put a real key or connection string in a committed file.
+Both live in a local, git-ignored `.env` during development and in Cloud Run
+environment variables when deployed. `.env.example` lists the variable names with
+no real values. **Never put a real key or password in a committed file.**
+
+## Working against the shared database
+
+There is **one** Cloud SQL instance and we all develop against it. Two things
+follow from that:
+
+- **Reads are safe to share.** The web app and `rank.py` only read, so everyone
+  querying at once is fine.
+- **Do NOT run the ingestion scripts (`ingest/igdb.py`, `ingest/steam.py`) casually.**
+  They **write** to the shared database - the same data the app and the demo depend
+  on. Running them (especially `--all`) mutates everyone's data. The catalog is
+  already loaded; ingestion only needs to run deliberately, when we've agreed to
+  refresh it.
