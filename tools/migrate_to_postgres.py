@@ -20,8 +20,7 @@ USAGE (from the repo root, venv active, proxy running):
     python tools/migrate_to_postgres.py --source "D:/programs/gamedb/game_library.db"
 
   --limit N   migrate only the first N games (and just their related rows) as a
-              dry run. Do this FIRST to prove the pipeline on a small slice before
-              turning it loose on the full ~304k. Drop the flag for the real run.
+              dry run.
   --source    path to the full SQLite scrape. Defaults to the GAMEDB_SOURCE env
               var, then to game_library.db at the repo root.
 
@@ -41,15 +40,15 @@ from pathlib import Path
 # so we can reuse db.get_connection() (which reads DB_* from .env / the environment).
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT))
-import db  # noqa: E402
+import db
 
-import psycopg  # noqa: E402
-from psycopg.types.json import Jsonb  # noqa: E402
+import psycopg
+from psycopg.types.json import Jsonb
 
 
 # ---------------------------------------------------------------------------
 # Table load order - PARENTS BEFORE CHILDREN. A child inserted before its
-# parent violates the foreign key. This order is the whole point of the task.
+# parent violates the foreign key.
 #
 # Each entry: (table, columns, per-row transform or None).
 # The transform receives a sqlite3.Row and returns a tuple of values in the same
@@ -59,16 +58,14 @@ from psycopg.types.json import Jsonb  # noqa: E402
 def _clean_date(v):
     """
     Postgres DATE rejects '', 'TBA', and other junk that SQLite TEXT tolerated.
-    Anything that isn't a plausible ISO date becomes NULL (the column is nullable).
-    We don't try to parse - just pass through real-looking dates, null the rest.
+    Anything that isn't a plausible ISO date becomes NULL.
     """
     if v is None:
         return None
     s = str(v).strip()
     if not s:
         return None
-    # crude ISO shape check: starts YYYY-MM-DD. Good enough; the scraper only ever
-    # wrote ISO dates or nothing, so this just catches stray '' / 'TBA' etc.
+    # catches stray '' / 'TBA' etc.
     if len(s) >= 10 and s[4] == "-" and s[7] == "-" and s[:4].isdigit():
         return s
     return None
@@ -81,7 +78,7 @@ def _game_row(r):
 
 
 def _raw_fetch_row(r):
-    # payload is stored as a JSON *string* in SQLite; the target column is JSONB.
+    # payload is stored as a JSON string in SQLite; the target column is JSONB.
     # Wrap valid JSON in Jsonb() so psycopg sends it as jsonb. If a row somehow
     # isn't valid JSON, store NULL rather than crash the whole migration.
     payload = r["payload"]
@@ -161,8 +158,7 @@ def _select_sql(table, columns, limit_ids):
     if table == "raw_fetch":
         # raw_fetch has no game_id - it links to games only indirectly, by
         # (source_id, source_native_id) matching game_source_ref. Under --limit we
-        # must NOT load it whole (it's the gigabytes table; that would defeat the
-        # point of a fast dry run). Scope it to the fetches whose native id belongs
+        # must not load it whole. Scope it to the fetches whose native id belongs
         # to one of the sliced games. On the full run this branch isn't taken.
         qcols = ", ".join(f"rf.{c}" for c in columns)
         return (
@@ -211,9 +207,7 @@ def migrate(source_path, limit=None):
             print(f"  {table}: {copied} rows loaded.        ")
             grand_total += copied
 
-        # --- reset identity sequences so the next auto-insert doesn't collide ---
-        # After loading explicit ids, each sequence still sits at 1. Bump each to
-        # MAX(id)+1. setval(..., MAX+1, false) means "next value returned is MAX+1".
+        # reset identity sequences so the next auto-insert doesn't collide
         print("\nResetting identity sequences...")
         with pconn.cursor() as pcur:
             for table, pk in SEQUENCES:
