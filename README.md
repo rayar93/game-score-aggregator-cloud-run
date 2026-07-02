@@ -40,11 +40,10 @@ team-AAA-summer2026/
 ├── web/                       # Cloud Run service
 │   ├── app.py                 # Flask app
 │   └── templates/             # Jinja2 pages
-├── ingest/                    # Cloud Run Job - WRITES to the shared DB; be careful
-│   ├── igdb.py
-│   └── steam.py
-└── tools/
-    └── migrate_to_postgres.py # one-time; loaded the SQLite scrape into Cloud SQL
+└──  ingest/                    # Cloud Run Job - WRITES to the shared DB; be careful
+    ├── igdb.py
+    └── steam.py
+
 ```
 
 ## Setup
