@@ -70,7 +70,7 @@ pip install -r requirements.txt
 # 4. authenticate for the proxy (opens a browser)
 gcloud auth application-default login
 
-# 5. install the Cloud SQL Auth Proxy (picks the right build for your OS)
+# 5. install the Cloud SQL Auth Proxy
 gcloud components install cloud-sql-proxy
 
 # 6. create your .env from the template, then get the DB password from Alan
