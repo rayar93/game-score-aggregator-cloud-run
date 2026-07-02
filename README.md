@@ -51,7 +51,10 @@ team-AAA-summer2026/
 
 We develop directly against the shared **Cloud SQL** instance through the Cloud
 SQL Auth Proxy - a small local program that opens a secure tunnel so your code can
-reach the cloud database at `127.0.0.1:5432`. Everyone needs it running.
+reach the cloud database. It authenticates with your Google account, so there's 
+no IP allowlisting or public exposure to deal with.
+
+One-time setup:
 
 ```bash
 # 1. clone, then from the repo folder, make a venv:
@@ -64,26 +67,29 @@ source .venv/bin/activate      # macOS/Linux
 # 3. install dependencies
 pip install -r requirements.txt
 
-# 4. authenticate for the proxy (one time, opens a browser)
+# 4. authenticate for the proxy (opens a browser)
 gcloud auth application-default login
 
-# 5. create your .env from the template, then get the DB password from Alan
+# 5. install the Cloud SQL Auth Proxy (picks the right build for your OS)
+gcloud components install cloud-sql-proxy
+
+# 6. create your .env from the template, then get the DB password from Alan
 copy .env.example .env         # Windows
 cp   .env.example .env         # macOS/Linux
 ```
 
-### Running the Auth Proxy
+**Every time you develop:** start the proxy in its own terminal and leave it open:
 
-Download the proxy binary from
-https://github.com/GoogleCloudPlatform/cloud-sql-proxy/releases (or install it via
-`gcloud components install cloud-sql-proxy`). Then, in its **own terminal that you
-leave open**, start it with our instance connection name: 
-`cloud-sql-proxy rayar-cs3537-2026:us-east1:gamedb-pg`
+```bash
+cloud-sql-proxy rayar-cs3537-2026:us-east1:gamedb-pg
+```
 
-It should print that it's listening on `127.0.0.1:5432` and then sit quietly -
-that's it working. Leave that window open the whole time you're developing. In a
-second terminal (venv active), you can now run the app or `python rank.py 20` and
-it hits the real database.
+It should print that it's listening and then sit quietly. 
+In a second terminal (venv active), run `python rank.py 20`;
+if you get 20 real games back, you're wired up and can start the app.
+
+If the proxy errors about credentials, your login expired - re-run
+`gcloud auth application-default login`.
 
 ## Secrets
 
