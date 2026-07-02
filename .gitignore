@@ -26,3 +26,8 @@ service-account*.json
 .DS_Store
 Thumbs.db
 
+# --- Cloud SQL Auth Proxy - personal dev tool, install outside the repo ---
+cloud-sql-proxy
+cloud-sql-proxy.exe
+cloud-sql-proxy.x64.exe
+*.x64.exe
