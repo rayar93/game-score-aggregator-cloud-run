@@ -1,6 +1,6 @@
 # Dockerfile - packages the Flask web service for Cloud Run.
 #
-# BUILD FROM THE REPO ROOT, not from web/:
+# Build from the repo root, not from web/:
 #     docker build -t gamedb-web .
 # The build context must be the root because db.py lives there (shared with the
 # ingest scripts) and the app imports it. A build context inside web/ can't reach
@@ -41,11 +41,3 @@ COPY web/ ./web/
 # The shell form lets $PORT expand at runtime (Cloud Run sets it).
 ENV PORT=8080
 CMD ["sh", "-c", "exec gunicorn --bind :$PORT --workers 2 --threads 4 --timeout 60 web.app:app"]
-
-# -- A note on connecting to Cloud SQL from inside the container (Task 9) --
-# Inside a container, 127.0.0.1 is the CONTAINER's own loopback, NOT your host
-# machine - so a proxy running on your laptop's 127.0.0.1:5432 is not reachable
-# at 127.0.0.1 from within the container. For local container testing you'd point
-# DB_HOST at host.docker.internal (Docker Desktop) instead. On Cloud Run, Task 9
-# decides the real connection method (Cloud SQL Python Connector or the built-in
-# Cloud SQL socket), which is a separate change - not baked into this Dockerfile.

@@ -8,6 +8,27 @@ database, then blends critic and user scores with user-configurable weighting,
 letting users search and filter by genre, platform, developer, publisher,
 release year, and minimum rating counts.
 
+## Live deployment
+
+The app is deployed on Cloud Run and serves the full catalog from Cloud SQL:
+
+    https://gamedb-web-849131695635.us-east1.run.app/
+
+`/health` returns `ok` without touching the database (Cloud Run's liveness check).
+The app connects to Cloud SQL through the Cloud Run ↔ Cloud SQL socket integration,
+so it needs no proxy - that's local-dev only.
+
+Redeploy after a code change (build from the repo root):
+
+    docker build -t gamedb-web .
+    docker tag gamedb-web us-east1-docker.pkg.dev/rayar-cs3537-2026/gamedb/gamedb-web:[VERSION TAG]
+    docker push us-east1-docker.pkg.dev/rayar-cs3537-2026/gamedb/gamedb-web:[VERSION TAG]
+    gcloud run deploy gamedb-web \
+      --image us-east1-docker.pkg.dev/rayar-cs3537-2026/gamedb/gamedb-web:[VERSION TAG] \
+      --region us-east1 --allow-unauthenticated --port 8080 \
+      --add-cloudsql-instances rayar-cs3537-2026:us-east1:gamedb-pg \
+      --set-env-vars "DB_HOST=/cloudsql/rayar-cs3537-2026:us-east1:gamedb-pg,DB_NAME=gamedb,DB_USER=postgres,DB_PASSWORD=[DB PASSWORD]"
+
 ## Architecture
 
 The whole application runs on **Cloud Run** as Docker containers:
@@ -33,6 +54,8 @@ team-AAA-summer2026/
 ├── README.md
 ├── requirements.txt           # install into your venv: pip install -r requirements.txt
 ├── .gitignore
+├── Dockerfile                 # builds the Cloud Run image
+├── .dockerignore
 ├── .env.example               # template; copy to a local .env (see Setup)
 ├── schema.sql                 # database schema (PostgreSQL)
 ├── db.py                      # shared data-access layer
