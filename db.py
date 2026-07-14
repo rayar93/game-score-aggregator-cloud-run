@@ -286,6 +286,77 @@ def find_game_by_source(conn, source_name, source_native_id):
     ).fetchone()
     return row["game_id"] if row else None
 
+def search_games(conn, title_query, limit=50):
+    """Search entire Catalog by title. """
+    
+    title_query = (title_query or "").strip()
+    
+    if not title_query:
+        return []
+    
+    return conn.execute(
+    """
+    SELECT
+        g.game_id,
+        g.canonical_title,
+        g.release_year,
+        g.summary,
+        g.cover_image_id,
+        MAX
+            (
+                CASE
+                    WHEN s.name = 'igdb'
+                    AND  sc.score_type = 'igdb_critic_rating'
+                    THEN sc.score_value
+                END
+        )   
+            AS igdb_critic,
+        MAX
+            (  
+                CASE 
+                   WHEN s.name = 'metacritic'
+                   AND sc.score_type = 'metacritic_critic'
+                   THEN sc.score_value
+                END  
+            )
+            AS metacritic,
+        MAX
+           (
+                CASE
+                  WHEN s.name = 'steam'
+                  AND sc.score_type = 'steam_positive_pct'
+                  THEN sc.score_value
+                END
+           )
+            AS steam_user
+        FROM game g
+        LEFT JOIN game_score sc ON sc.game_id = g.game_id
+        LEFT JOIN source s ON s.source_id = sc.source_id
+        WHERE g.canonical_title ILIKE %s
+        GROUP BY
+            g.game_id,
+            g.canonical_title,
+            g.release_year,
+            g.summary,
+            g.cover_image_id
+        ORDER BY
+            CASE
+                WHEN LOWER(g.canonical_title) = LOWER(%s) THEN 0
+                WHEN LOWER(g.canonical_title) LIKE LOWER (%s) THEN 1
+                ELSE 2
+            END,
+            g.canonical_title
+        LIMIT %s
+    """,
+    (
+        f"%{title_query}%",
+        title_query,
+        f"{title_query}%",
+        limit,
+    ),
+    ).fetchall()
+
+
 
 def ranked_games(conn, min_critic_count=0, min_user_count=0, limit=50,
                  steam_only=False, sort_by="score", min_score=0,

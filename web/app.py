@@ -13,6 +13,7 @@ PORT env var, which the __main__ block below respects.
 """
 import os
 import sys
+
 from pathlib import Path
 
 from flask import Flask, render_template, request, g
@@ -76,21 +77,49 @@ def index():
     min_users = _int_arg("min_users", 4000)    # combined user ratings must total >= this
     genre = request.args.get("genre") or None
     steam_only = request.args.get("steam") in ("1", "true", "yes")
-
-    rows = db.ranked_games(conn, limit=limit, steam_only=steam_only,
-                           min_critic_count=min_critics, min_user_count=min_users)
-
-    # genre filtering isn't a ranked_games arg (it excludes, not includes), so if a
-    # genre was asked for, keep only rows carrying it. Small N (<=200), so per-row
-    # genre lookup is fine here; a SQL-side include filter is a Sprint 2 db.py add.
+    
+    search_query = (request.args.get("q")or "").strip()
+    
+    if search_query:
+        rows = db.search_games(
+            conn, 
+            title_query = search_query,
+            limit=limit,
+        )
+        search_mode = True
+    else:
+        rows = db.ranked_games(
+        
+            conn,
+            limit=limit,
+            steam_only=steam_only,
+            min_critic_count= min_critics,
+            min_user_count= min_users,
+        )
+        search_mode = False
+    
     if genre:
         wanted = genre.lower()
-        rows = [r for r in rows
-                if wanted in (name.lower() for name in db.genres_for(conn, r["game_id"]))]
-
-    return render_template("index.html", games=rows, count=len(rows),
-                           limit=limit, genre=genre, steam_only=steam_only,
-                           min_critics=min_critics, min_users=min_users)
+        rows = [
+            r for r in rows
+            if wanted in(
+                name.lower()
+                for name in db.genres_for(conn, r["game_id"])
+            )
+        ]
+    
+    return render_template(
+        "index.html",
+        games=rows,
+        count=len(rows),
+        limit=limit,
+        genre=genre,
+        steam_only = steam_only,
+        min_critics=min_critics,
+        min_users=min_users,
+        search_query=search_query,
+        search_mode = search_mode    
+    )
 
 
 @app.route("/health")
