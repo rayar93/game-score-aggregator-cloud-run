@@ -29,7 +29,8 @@ Redeploy after a code change (build from the repo root):
       --image us-east1-docker.pkg.dev/rayar-cs3537-2026/gamedb/gamedb-web:[VERSION TAG] \
       --region us-east1 --allow-unauthenticated --port 8080 \
       --add-cloudsql-instances rayar-cs3537-2026:us-east1:gamedb-pg \
-      --set-env-vars "DB_HOST=/cloudsql/rayar-cs3537-2026:us-east1:gamedb-pg,DB_NAME=gamedb,DB_USER=postgres,DB_PASSWORD=[DB PASSWORD]"
+      --set-env-vars "DB_HOST=/cloudsql/rayar-cs3537-2026:us-east1:gamedb-pg,DB_NAME=gamedb,DB_USER=gamedb_web"
+      --set-secrets "DB_PASSWORD=db-password-web:latest"
 
 ## Architecture
 
@@ -100,7 +101,7 @@ gcloud auth application-default login
 # 5. install the Cloud SQL Auth Proxy
 gcloud components install cloud-sql-proxy
 
-# 6. create your .env from the template, then get the DB password from Alan
+# 6. create your .env from the template, then get the gamedb_web password from Alan
 copy .env.example .env         # Windows
 cp   .env.example .env         # macOS/Linux
 ```
@@ -124,15 +125,20 @@ Two kinds, needed by different parts:
 
 - **Database credentials** - the Cloud SQL password, in your `.env`. Needed by
   **anything that connects to the database, which now includes local development**,
-  since we develop against the shared instance. Get the password from Alan; don't
-  commit it.
+  since we develop against the shared instance. Get the gamedb_web password from Alan; 
+  don't commit it.
 - **API keys** - Twitch client id/secret, which are also your IGDB credentials (IGDB
   authenticates through Twitch; Steam needs no key). Needed **only** to run the
   ingestion scripts (`ingest/`). The web app doesn't touch them.
 
-Both live in a local, git-ignored `.env` during development and in Cloud Run
-environment variables when deployed. `.env.example` lists the variable names with
-no real values. **Never put a real key or password in a committed file.**
+Both live in a local, git-ignored `.env` during development. When deployed,
+they live in **Google Secret Manager**: Cloud Run injects them into the web
+service and the ingestion job as environment variables at container start
+(`--set-secrets`), so no plaintext value appears in the service or job
+configuration. The code can't tell the difference - `db.py` and the ingest
+scripts just read environment variables in both worlds. `.env.example` lists
+the variable names with no real values. **Never put a real key or password in
+a committed file.**
 
 ## Working against the shared database
 
