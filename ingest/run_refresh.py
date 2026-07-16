@@ -1,7 +1,7 @@
 """
 run_refresh.py - the entrypoint for the scheduled ingestion Cloud Run Job.
 
-Runs the full monthly refresh as two ordered passes:
+Runs the full refresh as two ordered passes:
   1. igdb.py --all    walk the IGDB catalog, upserting every game (picks up new
                       releases at the tail; idempotent, so re-walking is safe).
   2. steam.py         enrich with Steam reviews + details. steam.py is
