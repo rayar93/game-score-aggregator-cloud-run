@@ -4,9 +4,8 @@ CS 3537 Cloud Computing - **Team AAA**: Alan Ray, Anthony Samson, Aaron White.
 A videogame database and discovery tool that's more searchable, filterable, and
 complete than existing sites. It ingests game data and ratings from **IGDB**,
 **Steam**, and possibly later **OpenCritic** into a normalized **Cloud SQL**
-database, then blends critic and user scores with user-configurable weighting,
-letting users search and filter by genre, platform, developer, publisher,
-release year, and minimum rating counts.
+database, then blends critic and user scores, letting users search and filter 
+by genre, platform, developer, publisher, release year, and minimum rating counts.
 
 ## Live deployment
 
@@ -17,6 +16,9 @@ The app is deployed on Cloud Run and serves the full catalog from Cloud SQL:
 `/health` returns `ok` without touching the database (Cloud Run's liveness check).
 The app connects to Cloud SQL through the Cloud Run ↔ Cloud SQL socket integration,
 so it needs no proxy - that's local-dev only.
+
+Do not stop the Cloud SQL instance to save credits, as that would break the scheduled 
+ingestion runs.
 
 Redeploy after a code change (build from the repo root):
 
@@ -52,18 +54,21 @@ ML-based recommendations from per-game metadata.
 ```
 team-AAA-summer2026/
 ├── README.md
-├── requirements.txt           # install into your venv: pip install -r requirements.txt
+├── requirements.txt                # install into your venv: pip install -r requirements.txt
 ├── .gitignore
-├── Dockerfile                 # builds the Cloud Run image
+├── Dockerfile                      # builds the Cloud Run image
+├── Dockerfile.ingest               # builds the ingestion image
 ├── .dockerignore
-├── .env.example               # template; copy to a local .env (see Setup)
-├── schema.sql                 # database schema (PostgreSQL)
-├── db.py                      # shared data-access layer
-├── rank.py                    # a CLI tool demonstrating how to call ranked_games
-├── web/                       # Cloud Run service
-│   ├── app.py                 # Flask app
-│   └── templates/             # Jinja2 pages
-└── ingest/                    # Cloud Run Job - WRITES to the shared DB; be careful
+├── Dockerfile.ingest.dockerignore
+├── .env.example                    # template; copy to a local .env (see Setup)
+├── schema.sql                      # database schema (PostgreSQL)
+├── db.py                           # shared data-access layer
+├── rank.py                         # a CLI tool demonstrating how to call ranked_games
+├── web/                            # Cloud Run service
+│   ├── app.py                      # Flask app
+│   └── templates/                  # Jinja2 pages
+└── ingest/                         # Cloud Run Job - WRITES to the shared DB; be careful
+    ├── run_refresh.py
     ├── igdb.py
     └── steam.py
 

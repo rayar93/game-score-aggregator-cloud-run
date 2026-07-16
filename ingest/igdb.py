@@ -363,7 +363,9 @@ def bulk_import(conn, where=DEFAULT_WHERE, page_size=500, max_games=None,
     RESUME: full runs save the last id reached to PROGRESS_FILE after every page,
     so a crash/sleep mid-run can be continued by just re-running - it picks up
     where it left off instead of re-walking from zero. The file is cleared on
-    clean completion. Capped runs (max_games set) are test runs and stay stateless.
+    clean completion. This is only of use locally, as the container that igdb.py 
+    runs in is stateless. Capped runs (max_games set) are test runs and stay stateless. 
+    
 
     max_games lets you cap a test run; leave it None to pull the whole filtered set.
     """
@@ -431,7 +433,6 @@ if __name__ == "__main__":
         cap = int(rest[0]) if rest else None
         scope = "Steam games only" if steam_only else "all main games"
         print(f"Bulk importing from IGDB ({scope}, cap = {cap if cap else 'none'}) ...")
-        print("Safe to re-run if interrupted - a full run resumes where it stopped.")
         n = bulk_import(conn, max_games=cap, steam_only=steam_only)
         print(f"Done. {n} games stored.")
     else:

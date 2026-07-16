@@ -1,0 +1,37 @@
+# --- secrets: never commit these ---
+.env
+.igdb_token.json
+
+# --- Git internals ---
+.git/
+.gitignore
+
+# --- importer resume state ---
+.igdb_bulk_progress.json
+
+# --- local database files ---
+*.db
+*.db-wal
+*.db-shm
+
+# --- python ---
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# --- GCP / cloud credentials ---
+secrets/
+*-key.json
+service-account*.json
+
+# --- editor / OS stuff ---
+.vscode/
+.DS_Store
+Thumbs.db
+
+# --- Cloud SQL Auth Proxy - personal dev tool, install outside the repo ---
+cloud-sql-proxy
+cloud-sql-proxy.exe
+cloud-sql-proxy.x64.exe
+*.x64.exe

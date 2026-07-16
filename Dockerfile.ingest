@@ -1,0 +1,23 @@
+# Dockerfile.ingest - packages the ingestion scripts as a Cloud Run job.
+#
+# Build from the repo root: docker build -f Dockerfile.ingest -t gamedb-ingest .
+#
+# The entrypoint is run_refresh.py, which runs igdb --all then steam --details in
+# order.
+
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY db.py .
+COPY schema.sql .
+COPY ingest/ ./ingest/
+
+# Run the full refresh once and exit.
+CMD ["python", "-m", "ingest.run_refresh"]

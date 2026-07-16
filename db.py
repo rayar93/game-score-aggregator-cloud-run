@@ -13,7 +13,7 @@ What's in here:
                          stage_raw, link_source, add_attributes, add_companies,
                          ensure_source, get_source_id
     Reading data         (web app) find_game_by_source, attributes_for, genres_for,
-                         all_genres, unsorted_games, games_by_status
+                         all_genres, unsorted_games, games_by_status, search_games
     Ranking              (web app) ranked_games (the critic/user blend - the main query)
 """
 
@@ -412,8 +412,7 @@ def ranked_games(conn, min_critic_count=0, min_user_count=0, limit=50,
     title_search is an optional case-insensitive substring match on the title:
     only games whose canonical_title contains it are returned. Because this filters
     the ranked results, it only finds games that already have BOTH scores - it is a
-    "search for a scored game", not a general "does this game exist" lookup. We'll 
-    write search_games later.
+    "search for a scored game", not a general "does this game exist" lookup.
 
     FUTURE (when OpenCritic lands): OpenCritic + IGDB critic become count-weighted
     together as 2/3 of the critic side, with Metacritic a fixed 1/3 - i.e. replace
@@ -449,7 +448,7 @@ def ranked_games(conn, min_critic_count=0, min_user_count=0, limit=50,
 
     # title_search: case-insensitive substring match on the canonical title.
     # LIMITATION: doesn't work on accent folding. Postgres fix is unaccent() + 
-    # pg_trgm, deferred to a later spring.
+    # pg_trgm, deferred to a later sprint.
     title_clause = ""
     if title_search:
         params["title_q"] = f"%{title_search.lower()}%"

@@ -1,5 +1,5 @@
 """
-app.py - minimal read-only web front-end for the game database.
+app.py - web front-end for the game database.
 
 Serves the ranked game list (the same blend rank.py prints, but as an HTML page)
 and a /health check for Cloud Run. This file turns db calls into web pages.
@@ -60,7 +60,6 @@ def index():
         /?genre=Roguelike       only games carrying that genre (IGDB or Steam)
         /?steam=1               only games with a Steam store page
 
-    Turning these into real web controls (dropdowns, a search box) is Sprint 2.
     """
     conn = get_db()
 
