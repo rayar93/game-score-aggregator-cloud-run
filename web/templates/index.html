@@ -30,8 +30,6 @@
       gap: 0.25rem;
       font-size: 0.85rem;
       font-weight:600;
-
-
     }
 
     input, button{
@@ -50,80 +48,118 @@
       cursor: pointer;
     }
 
-
+        select { font: inherit; padding: 0.45rem; }
+    fieldset.genres { grid-column: 1 / -1; border: 1px solid #ddd; border-radius: 0.5rem; padding: 0.5rem 0.75rem; }
+    fieldset.genres legend { font-size: 0.85rem; font-weight: 600; padding: 0 0.25rem; }
+    .genre-pick { display: inline-flex; flex-direction: row; align-items: center; gap: 0.3rem; font-weight: 400; margin: 0.15rem 0.9rem 0.15rem 0; }
+    .genre-pick .count { color: #888; font-size: 0.8em; }
+    .genres details { margin-top: 0.4rem; }
+    .genres summary { cursor: pointer; font-size: 0.85rem; color: #555; }
   </style>
 </head>
+
+
 <body>
   <h1>gamedb</h1>
-  <form method ="get" action="/">
+  <form method="get" action="/">
     <label>
       Search title
-      <input
-      type ="search"
-      name ="q"
-      value ="{{search_query or ''}}"
-      placeholder = "Hades, Portal, Zelda...."
-      >
+      <input type="search" name="q" value="{{ search_query or '' }}" placeholder="Hades, Portal, Zelda...">
     </label>
 
     <label>
-       Genre
-       <input
-       type = "text"
-       name="genre"
-       value="{{genre or ''}}"
-       placeholder = "RPG"
-        >
-      </label>
+      Sort by
+      <select name="sort">
+        <option value="score" {% if sort == 'score' %}selected{% endif %}>Blended score</option>
+        <option value="popularity" {% if sort == 'popularity' %}selected{% endif %}>Popularity (most rated)</option>
+      </select>
+    </label>
 
-      <label>
-       Result limit
-        <input
-        type = "number"
-        name ="limit"
-        value="{{limit}}"
-        min="1"
-        max="200"
-        >
-      </label>
+    <label>
+      Result limit
+      <input type="number" name="limit" value="{{ limit }}" min="1" max="1000">
+    </label>
 
-      <label>
-        Minimum critic reviews
-        <input
-           type ="number"
-           name ="min_critics"
-           value ="{{min_critics}}"
-           min="0"
-        >
-      </label>
-      
-      <label>
-        Minimum user ratings
-        <input
-        type="number"
-        name="min_users"
-        value="{{min_users}}"
-        min="0"
-        >
-      </label>
+    <label>
+      Min critic reviews (IGDB)
+      <input type="number" name="min_critics" value="{{ min_critics }}" min="0">
+    </label>
 
-      <label class = "checkbox">
-        <input 
-        type="checkbox"
-        name="steam"
-        value="1"
-        {% if steam_only%}checked{% endif %}
-        >
-        Steam only
-      </label>
+    <label>
+      Minimum user ratings
+      <input type="number" name="min_users" value="{{ min_users }}" min="0">
+    </label>
 
-      <button type="submit">Apply</button>
-    </form>
+    <label>
+      Min blended score
+      <input type="number" name="min_score" value="{{ min_score }}" min="0" max="100">
+    </label>
 
+    <label>
+      Min critic score
+      <input type="number" name="min_critic_score" value="{{ min_critic_score }}" min="0" max="100">
+    </label>
 
+    <label>
+      Min user score
+      <input type="number" name="min_user_score" value="{{ min_user_score }}" min="0" max="100">
+    </label>
+
+    <label>
+      Year from
+      <input type="number" name="min_year" value="{{ min_year if min_year is not none else '' }}" placeholder="1980">
+    </label>
+
+    <label>
+      Year to
+      <input type="number" name="max_year" value="{{ max_year if max_year is not none else '' }}" placeholder="2026">
+    </label>
+
+    <label>
+      Critic weight: <span id="cw-label">{{ critic_weight }}</span>% critic
+      <input type="range" name="critic_weight" min="0" max="100" value="{{ critic_weight }}"
+             oninput="document.getElementById('cw-label').textContent = this.value">
+    </label>
+
+    <label>
+      Exclude genres (comma-separated)
+      <input type="text" name="exclude" value="{{ exclude or '' }}" placeholder="Sports, Racing">
+    </label>
+
+    <label class="checkbox">
+      <input type="checkbox" name="steam" value="1" {% if steam_only %}checked{% endif %}>
+      Steam only
+    </label>
+
+    <fieldset class="genres">
+      <legend>Genres - a game matches if it has ANY selected genre</legend>
+      {% for g in genre_options[:15] %}
+        <label class="genre-pick">
+          <input type="checkbox" name="genre" value="{{ g.name }}"
+                 {% if g.name in selected_genres %}checked{% endif %}>
+          {{ g.name }} <span class="count">({{ g.n_games }})</span>
+        </label>
+      {% endfor %}
+      {% if genre_options|length > 15 %}
+      <details {% if more_open %}open{% endif %}>
+        <summary>More genres...</summary>
+        {% for g in genre_options[15:] %}
+          <label class="genre-pick">
+            <input type="checkbox" name="genre" value="{{ g.name }}"
+                   {% if g.name in selected_genres %}checked{% endif %}>
+            {{ g.name }} <span class="count">({{ g.n_games }})</span>
+          </label>
+        {% endfor %}
+      </details>
+      {% endif %}
+    </fieldset>
+
+    <button type="submit">Apply</button>
+  </form>
       
   <p class="meta">
-    Top {{ count }} by blended critic/user score{% if genre %}, genre &ldquo;{{ genre }}&rdquo;{% endif %}{% if steam_only %}, Steam store pages only{% endif %}.
+    {% if search_query %}{{ count }} results for &ldquo;{{ search_query }}&rdquo;
+    {% else %}Top {{ count }} by {% if sort == 'popularity' %}popularity{% else %}blended critic/user score{% endif %}{% endif %}{% if critic_weight != 50 %}, weighted {{ critic_weight }}/{{ 100 - critic_weight }} critic/user{% endif %}{% if selected_genres %}, genres: {{ selected_genres | join(", ") }}{% endif %}{% if steam_only %}, Steam store pages only{% endif %}.
   </p>
 
   <table>

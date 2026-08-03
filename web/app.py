@@ -71,15 +71,25 @@ def index():
             return default
         return min(v, cap) if cap is not None else v
 
-    limit = _int_arg("limit", 50, cap=200)
-    min_critics = _int_arg("min_critics", 5)   # IGDB critic rating needs >= this many reviews
+    limit = _int_arg("limit", 50, cap=1000)
+    min_critics = _int_arg("min_critics", 5)   # hard floor on IGDB critic review count
     min_users = _int_arg("min_users", 4000)    # combined user ratings must total >= this
     critic_weight = max(0, min(100, _int_arg("critic_weight", 50)))
+    min_score = _int_arg("min_score", 0)
+    min_critic_score = _int_arg("min_critic_score", 0)
+    min_user_score = _int_arg("min_user_score", 0)
     min_year = _int_arg("min_year", None)
     max_year = _int_arg("max_year", None)
-    genre = request.args.get("genre") or None
     steam_only = request.args.get("steam") in ("1", "true", "yes")
-    
+
+    sort = request.args.get("sort")
+    if sort not in ("score", "popularity"):
+        sort = "score"
+
+    genres = [g for g in request.args.getlist("genre") if g.strip()]
+    exclude_raw = (request.args.get("exclude") or "").strip()
+    exclude_genres = [g.strip() for g in exclude_raw.split(",") if g.strip()] or None
+
     search_query = (request.args.get("q") or "").strip()
 
     rows = db.ranked_games(
@@ -88,29 +98,45 @@ def index():
         steam_only=steam_only,
         min_critic_count=min_critics,
         min_user_count=min_users,
-        title_search=search_query or None,
-        require_both_scores=not search_query,
-        critic_weight=critic_weight / 100.0,
-        strict_critic_count=True,
+        min_score=min_score,
+        min_critic_score=min_critic_score,
+        min_user_score=min_user_score,
         min_year=min_year,
         max_year=max_year,
-        sort_by="relevance" if search_query else "score",
-        include_genres=[genre] if genre else None,
+        strict_critic_count=True,
+        critic_weight=critic_weight / 100.0,
+        include_genres=genres or None,
+        exclude_genres=exclude_genres,
+        title_search=search_query or None,
+        require_both_scores=not search_query,
+        sort_by="relevance" if search_query else sort,
     )
-    
+
+    # genre list for the form checkboxes (most-common first, with counts)
+    genre_options = db.all_genres(conn)
+    top_names = [g["name"] for g in genre_options[:15]]
+    more_open = any(g not in top_names for g in genres)
+
     return render_template(
         "index.html",
         games=rows,
         count=len(rows),
         limit=limit,
-        genre=genre,
-        steam_only = steam_only,
+        genre_options=genre_options,
+        selected_genres=genres,
+        more_open=more_open,
+        exclude=exclude_raw,
+        steam_only=steam_only,
         min_critics=min_critics,
         min_users=min_users,
-        search_query=search_query,
-        critic_weight=critic_weight,
+        min_score=min_score,
+        min_critic_score=min_critic_score,
+        min_user_score=min_user_score,
         min_year=min_year,
         max_year=max_year,
+        critic_weight=critic_weight,
+        sort=sort,
+        search_query=search_query,
     )
 
 
