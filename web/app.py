@@ -88,17 +88,8 @@ def index():
         title_search=search_query or None,
         require_both_scores=not search_query,
         sort_by="relevance" if search_query else "score",
+        include_genres=[genre] if genre else None,
     )
-    
-    if genre:
-        wanted = genre.lower()
-        rows = [
-            r for r in rows
-            if wanted in(
-                name.lower()
-                for name in db.genres_for(conn, r["game_id"])
-            )
-        ]
     
     return render_template(
         "index.html",

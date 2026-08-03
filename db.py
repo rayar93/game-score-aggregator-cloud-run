@@ -209,6 +209,30 @@ GENRE_KINDS = ("genre", "steam_genre")
 _GENRE_KINDS_SQL = "(" + ",".join(f"'{k}'" for k in GENRE_KINDS) + ")"
 
 
+def _attr_filter(params, key_prefix, kinds, names, exclude=False):
+    """
+    Build an `AND [NOT] EXISTS (...)` clause testing whether a game carries ANY
+    attribute of the given kinds whose name matches one of `names`
+    (case-insensitive) - i.e. multiple names are OR, not AND. Adds the name
+    bindings to `params` as a side effect. `kinds` are code constants (see
+    GENRE_KINDS), never user input, so inlining them into SQL is safe.
+    """
+    keys = []
+    for i, name in enumerate(names):
+        key = f"{key_prefix}{i}"
+        params[key] = name.lower()
+        keys.append(f"%({key})s")
+    kinds_sql = "(" + ",".join(f"'{k}'" for k in kinds) + ")"
+    op = "NOT EXISTS" if exclude else "EXISTS"
+    return f"""
+          AND {op} (SELECT 1 FROM game_attribute gax
+                    JOIN attribute ax ON ax.attribute_id = gax.attribute_id
+                    WHERE gax.game_id = scored.game_id
+                      AND ax.kind IN {kinds_sql}
+                      AND LOWER(ax.name) IN ({",".join(keys)}))
+    """
+
+
 def genres_for(conn, game_id):
     """All genres on a game, unioned across sources (IGDB + Steam), de-duplicated."""
     return [r["name"] for r in conn.execute(
@@ -289,8 +313,8 @@ def find_game_by_source(conn, source_name, source_native_id):
 
 def ranked_games(conn, min_critic_count=0, min_user_count=0, limit=50,
                  steam_only=False, sort_by="score", min_score=0,
-                 exclude_genres=None, min_critic_score=0, min_user_score=0,
-                 title_search=None, require_both_scores=True):
+                 exclude_genres=None, include_genres=None, min_critic_score=0, 
+                 min_user_score=0, title_search=None, require_both_scores=True):
     """
     Rank games by a critic/user blend.
 
@@ -338,6 +362,12 @@ def ranked_games(conn, min_critic_count=0, min_user_count=0, limit=50,
     both spellings (e.g. "RPG" and "Role-playing (RPG)"); all_genres() shows what
     spellings actually exist.
 
+    include_genres is the mirror: an optional list of genre names; only games
+    carrying AT LEAST ONE of them (from either source, case-insensitive) are
+    kept. Multiple names are OR - "any of these", not "all of these". Same
+    spelling caveat as exclude_genres: IGDB and Steam name genres differently,
+    so check all_genres() for the spellings that actually exist.
+
     title_search is an optional case-insensitive substring match on the title:
     only games whose canonical_title contains it are returned. Because this filters
     the ranked results, it only finds games that already have BOTH scores unless 
@@ -369,20 +399,8 @@ def ranked_games(conn, min_critic_count=0, min_user_count=0, limit=50,
                       WHERE gsr.game_id = scored.game_id AND s2.name = 'steam')
     """ if steam_only else "")
 
-    exclude_clause = ""
-    if exclude_genres:
-        ex_keys = []
-        for i, name in enumerate(exclude_genres):
-            key = f"exg{i}"
-            params[key] = name.lower()
-            ex_keys.append(f"%({key})s")
-        exclude_clause = f"""
-          AND NOT EXISTS (SELECT 1 FROM game_attribute gax
-                          JOIN attribute ax ON ax.attribute_id = gax.attribute_id
-                          WHERE gax.game_id = scored.game_id
-                            AND ax.kind IN {_GENRE_KINDS_SQL}
-                            AND LOWER(ax.name) IN ({",".join(ex_keys)}))
-        """
+    include_clause = _attr_filter(params, "ing", GENRE_KINDS, include_genres) if include_genres else ""
+    exclude_clause = _attr_filter(params, "exg", GENRE_KINDS, exclude_genres, exclude=True) if exclude_genres else ""
 
     # title_search: case-insensitive substring match on the canonical title.
     # Lives inside the pivot CTE so search mode's LEFT JOIN only aggregates
@@ -475,6 +493,7 @@ def ranked_games(conn, min_critic_count=0, min_user_count=0, limit=50,
         WHERE TRUE
           {score_filters}
           {steam_clause}
+          {include_clause}
           {exclude_clause}
         {order_clause}
         {limit_clause}
