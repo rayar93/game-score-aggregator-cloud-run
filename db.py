@@ -314,7 +314,8 @@ def find_game_by_source(conn, source_name, source_native_id):
 def ranked_games(conn, min_critic_count=0, min_user_count=0, limit=50,
                  steam_only=False, sort_by="score", min_score=0,
                  exclude_genres=None, include_genres=None, min_critic_score=0, 
-                 min_user_score=0, title_search=None, require_both_scores=True):
+                 min_user_score=0, title_search=None, require_both_scores=True, 
+                 critic_weight=0.5):
     """
     Rank games by a critic/user blend.
 
@@ -326,7 +327,8 @@ def ranked_games(conn, min_critic_count=0, min_user_count=0, limit=50,
                With both present it's a straight 50/50 average; with one, it's that one.
       user   = count-weighted average of Steam %-positive and IGDB user rating,
                weighted by review count / rating count.
-      final  = (critic + user) / 2
+      final  = critic * critic_weight + user * (1 - critic_weight)
+               (critic_weight defaults to 0.5)
 
     A game needs a critic score AND a user score to appear. min_user_count filters
     by the COMBINED user count (steam reviews + igdb ratings).
@@ -380,6 +382,10 @@ def ranked_games(conn, min_critic_count=0, min_user_count=0, limit=50,
     missing data passes through instead of being filtered on a value it
     doesn't have.
 
+    critic_weight (0.0-1.0, clamped) sets how much of the final score comes
+    from the critic side. 1.0 = critics only, 0.0 = users only. It also moves
+    the min_score floor, which always applies to the weighted blend.
+    
     sort_by also accepts "relevance": exact title match first, then prefix
     matches, then substring matches, alphabetical within each band. Only
     meaningful together with title_search; without one it falls back to the
@@ -391,6 +397,12 @@ def ranked_games(conn, min_critic_count=0, min_user_count=0, limit=50,
     """
     params = {"minc": min_critic_count, "minu": min_user_count, "minscore": min_score,
               "mincritscore": min_critic_score, "minuserscore": min_user_score}
+
+    # clamp so a bad caller can't invert the blend or push scores out of range
+    params["cw"] = max(0.0, min(1.0, critic_weight))
+
+    # the blended score - written once, interpolated everywhere it appears
+    blend = "(critic_score * %(cw)s + user_score * (1 - %(cw)s))"
 
     limit_clause = "LIMIT %(lim)s" if limit else ""
     steam_clause = ("""
@@ -415,12 +427,12 @@ def ranked_games(conn, min_critic_count=0, min_user_count=0, limit=50,
     if sort_by == "relevance" and title_search:
         params["title_exact"] = title_search.lower()
         params["title_prefix"] = f"{title_search.lower()}%"
-        order_clause = """ORDER BY CASE
+        order_clause = f"""ORDER BY CASE
                               WHEN LOWER(canonical_title) = %(title_exact)s THEN 0
                               WHEN LOWER(canonical_title) LIKE %(title_prefix)s THEN 1
                               ELSE 2
                           END,
-                          COALESCE((critic_score + user_score) / 2.0, critic_score, user_score) DESC NULLS LAST,
+                          COALESCE({blend}, critic_score, user_score) DESC NULLS LAST,
                           canonical_title"""
     elif sort_by == "popularity":
         order_clause = "ORDER BY user_n DESC, final_score DESC NULLS LAST"
@@ -432,17 +444,17 @@ def ranked_games(conn, min_critic_count=0, min_user_count=0, limit=50,
     score_join = "JOIN" if require_both_scores else "LEFT JOIN"
 
     if require_both_scores:
-        score_filters = """
+        score_filters = f"""
           AND critic_score IS NOT NULL AND user_score IS NOT NULL
           AND user_den >= %(minu)s
-          AND (critic_score + user_score) / 2.0 >= %(minscore)s
+          AND {blend} >= %(minscore)s
           AND critic_score >= %(mincritscore)s
           AND user_score >= %(minuserscore)s"""
     else:
-        score_filters = """
+        score_filters = f"""
           AND (user_score IS NULL OR user_den >= %(minu)s)
           AND (critic_score IS NULL OR user_score IS NULL
-               OR (critic_score + user_score) / 2.0 >= %(minscore)s)
+               OR {blend} >= %(minscore)s)
           AND (critic_score IS NULL OR critic_score >= %(mincritscore)s)
           AND (user_score IS NULL OR user_score >= %(minuserscore)s)"""
 
@@ -488,7 +500,7 @@ def ranked_games(conn, min_critic_count=0, min_user_count=0, limit=50,
         SELECT game_id, canonical_title, release_year, summary, cover_image_id,
                igdb_critic, igdb_critic_n, metacritic, critic_score,
                igdb_user, igdb_user_n, steam_user, steam_user_n, user_den AS user_n, user_score,
-               (critic_score + user_score) / 2.0 AS final_score
+               {blend} AS final_score
         FROM scored
         WHERE TRUE
           {score_filters}

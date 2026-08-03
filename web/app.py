@@ -74,6 +74,7 @@ def index():
     limit = _int_arg("limit", 50, cap=200)
     min_critics = _int_arg("min_critics", 5)   # IGDB critic rating needs >= this many reviews
     min_users = _int_arg("min_users", 4000)    # combined user ratings must total >= this
+    critic_weight = max(0, min(100, _int_arg("critic_weight", 50)))
     genre = request.args.get("genre") or None
     steam_only = request.args.get("steam") in ("1", "true", "yes")
     
@@ -87,6 +88,7 @@ def index():
         min_user_count=min_users,
         title_search=search_query or None,
         require_both_scores=not search_query,
+        critic_weight=critic_weight / 100.0,
         sort_by="relevance" if search_query else "score",
         include_genres=[genre] if genre else None,
     )
@@ -100,7 +102,8 @@ def index():
         steam_only = steam_only,
         min_critics=min_critics,
         min_users=min_users,
-        search_query=search_query,  
+        search_query=search_query,
+        critic_weight=critic_weight,
     )
 
 
