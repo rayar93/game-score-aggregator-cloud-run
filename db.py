@@ -13,7 +13,7 @@ What's in here:
                          stage_raw, link_source, add_attributes, add_companies,
                          ensure_source, get_source_id
     Reading data         (web app) find_game_by_source, attributes_for, genres_for,
-                         all_genres, unsorted_games, games_by_status, search_games
+                         all_genres, unsorted_games, games_by_status
     Ranking              (web app) ranked_games (the critic/user blend - the main query)
 """
 
@@ -286,82 +286,11 @@ def find_game_by_source(conn, source_name, source_native_id):
     ).fetchone()
     return row["game_id"] if row else None
 
-def search_games(conn, title_query, limit=50):
-    """Search entire Catalog by title. """
-    
-    title_query = (title_query or "").strip()
-    
-    if not title_query:
-        return []
-    
-    return conn.execute(
-    """
-    SELECT
-        g.game_id,
-        g.canonical_title,
-        g.release_year,
-        g.summary,
-        g.cover_image_id,
-        MAX
-            (
-                CASE
-                    WHEN s.name = 'igdb'
-                    AND  sc.score_type = 'igdb_critic_rating'
-                    THEN sc.score_value
-                END
-        )   
-            AS igdb_critic,
-        MAX
-            (  
-                CASE 
-                   WHEN s.name = 'metacritic'
-                   AND sc.score_type = 'metacritic_critic'
-                   THEN sc.score_value
-                END  
-            )
-            AS metacritic,
-        MAX
-           (
-                CASE
-                  WHEN s.name = 'steam'
-                  AND sc.score_type = 'steam_positive_pct'
-                  THEN sc.score_value
-                END
-           )
-            AS steam_user
-        FROM game g
-        LEFT JOIN game_score sc ON sc.game_id = g.game_id
-        LEFT JOIN source s ON s.source_id = sc.source_id
-        WHERE g.canonical_title ILIKE %s
-        GROUP BY
-            g.game_id,
-            g.canonical_title,
-            g.release_year,
-            g.summary,
-            g.cover_image_id
-        ORDER BY
-            CASE
-                WHEN LOWER(g.canonical_title) = LOWER(%s) THEN 0
-                WHEN LOWER(g.canonical_title) LIKE LOWER (%s) THEN 1
-                ELSE 2
-            END,
-            g.canonical_title
-        LIMIT %s
-    """,
-    (
-        f"%{title_query}%",
-        title_query,
-        f"{title_query}%",
-        limit,
-    ),
-    ).fetchall()
-
-
 
 def ranked_games(conn, min_critic_count=0, min_user_count=0, limit=50,
                  steam_only=False, sort_by="score", min_score=0,
                  exclude_genres=None, min_critic_score=0, min_user_score=0,
-                 title_search=None):
+                 title_search=None, require_both_scores=True):
     """
     Rank games by a critic/user blend.
 
@@ -411,8 +340,20 @@ def ranked_games(conn, min_critic_count=0, min_user_count=0, limit=50,
 
     title_search is an optional case-insensitive substring match on the title:
     only games whose canonical_title contains it are returned. Because this filters
-    the ranked results, it only finds games that already have BOTH scores - it is a
-    "search for a scored game", not a general "does this game exist" lookup.
+    the ranked results, it only finds games that already have BOTH scores unless 
+    require_both_scores=False.
+
+    require_both_scores (default True) preserves the classic contract above.
+    False is "search mode": games missing either score (or both) are still
+    returned, with NULL in the missing score columns and in final_score; the
+    score/count floors then apply only to games that HAVE the relevant score -
+    missing data passes through instead of being filtered on a value it
+    doesn't have.
+
+    sort_by also accepts "relevance": exact title match first, then prefix
+    matches, then substring matches, alphabetical within each band. Only
+    meaningful together with title_search; without one it falls back to the
+    "score" ordering.
 
     FUTURE (when OpenCritic lands): OpenCritic + IGDB critic become count-weighted
     together as 2/3 of the critic side, with Metacritic a fixed 1/3 - i.e. replace
@@ -421,9 +362,6 @@ def ranked_games(conn, min_critic_count=0, min_user_count=0, limit=50,
     params = {"minc": min_critic_count, "minu": min_user_count, "minscore": min_score,
               "mincritscore": min_critic_score, "minuserscore": min_user_score}
 
-    order_clause = ("ORDER BY user_n DESC, final_score DESC"
-                    if sort_by == "popularity"
-                    else "ORDER BY final_score DESC, user_n DESC")
     limit_clause = "LIMIT %(lim)s" if limit else ""
     steam_clause = ("""
           AND EXISTS (SELECT 1 FROM game_source_ref gsr
@@ -447,16 +385,52 @@ def ranked_games(conn, min_critic_count=0, min_user_count=0, limit=50,
         """
 
     # title_search: case-insensitive substring match on the canonical title.
-    # LIMITATION: doesn't work on accent folding. Postgres fix is unaccent() + 
+    # Lives inside the pivot CTE so search mode's LEFT JOIN only aggregates
+    # matching games, not the whole catalog.
+    # LIMITATION: doesn't work on accent folding. Postgres fix is unaccent() +
     # pg_trgm, deferred to a later sprint.
-    title_clause = ""
+    title_where = ""
     if title_search:
         params["title_q"] = f"%{title_search.lower()}%"
-        title_clause = "AND LOWER(canonical_title) LIKE %(title_q)s"
+        title_where = "WHERE LOWER(g.canonical_title) LIKE %(title_q)s"
+
+    if sort_by == "relevance" and title_search:
+        params["title_exact"] = title_search.lower()
+        params["title_prefix"] = f"{title_search.lower()}%"
+        order_clause = """ORDER BY CASE
+                              WHEN LOWER(canonical_title) = %(title_exact)s THEN 0
+                              WHEN LOWER(canonical_title) LIKE %(title_prefix)s THEN 1
+                              ELSE 2
+                          END,
+                          COALESCE((critic_score + user_score) / 2.0, critic_score, user_score) DESC NULLS LAST,
+                          canonical_title"""
+    elif sort_by == "popularity":
+        order_clause = "ORDER BY user_n DESC, final_score DESC NULLS LAST"
+    else:
+        order_clause = "ORDER BY final_score DESC NULLS LAST, user_n DESC"
+
+    # Ranked mode drops unscored games anyway, so it keeps the cheaper INNER
+    # JOIN; search mode needs LEFT JOIN so score-less games survive the pivot.
+    score_join = "JOIN" if require_both_scores else "LEFT JOIN"
+
+    if require_both_scores:
+        score_filters = """
+          AND critic_score IS NOT NULL AND user_score IS NOT NULL
+          AND user_den >= %(minu)s
+          AND (critic_score + user_score) / 2.0 >= %(minscore)s
+          AND critic_score >= %(mincritscore)s
+          AND user_score >= %(minuserscore)s"""
+    else:
+        score_filters = """
+          AND (user_score IS NULL OR user_den >= %(minu)s)
+          AND (critic_score IS NULL OR user_score IS NULL
+               OR (critic_score + user_score) / 2.0 >= %(minscore)s)
+          AND (critic_score IS NULL OR critic_score >= %(mincritscore)s)
+          AND (user_score IS NULL OR user_score >= %(minuserscore)s)"""
 
     query = f"""
         WITH pivot AS (
-            SELECT g.game_id, g.canonical_title, g.release_year,
+            SELECT g.game_id, g.canonical_title, g.release_year, g.summary, g.cover_image_id,
                 MAX(CASE WHEN s.name='igdb'       AND sc.score_type='igdb_critic_rating' THEN sc.score_value  END) AS igdb_critic,
                 MAX(CASE WHEN s.name='igdb'       AND sc.score_type='igdb_critic_rating' THEN sc.sample_count END) AS igdb_critic_n,
                 MAX(CASE WHEN s.name='metacritic' AND sc.score_type='metacritic_critic'  THEN sc.score_value  END) AS metacritic,
@@ -465,8 +439,9 @@ def ranked_games(conn, min_critic_count=0, min_user_count=0, limit=50,
                 MAX(CASE WHEN s.name='steam'      AND sc.score_type='steam_positive_pct' THEN sc.score_value  END) AS steam_user,
                 MAX(CASE WHEN s.name='steam'      AND sc.score_type='steam_positive_pct' THEN sc.sample_count END) AS steam_user_n
             FROM game g
-            JOIN game_score sc ON sc.game_id = g.game_id
-            JOIN source s ON s.source_id = sc.source_id
+            {score_join} game_score sc ON sc.game_id = g.game_id
+            {score_join} source s ON s.source_id = sc.source_id
+            {title_where}
             GROUP BY g.game_id
         ),
         calc AS (
@@ -492,26 +467,21 @@ def ranked_games(conn, min_critic_count=0, min_user_count=0, limit=50,
                 CASE WHEN user_den   > 0 THEN user_num   * 1.0 / user_den   END AS user_score
             FROM agg
         )
-        SELECT game_id, canonical_title, release_year,
+        SELECT game_id, canonical_title, release_year, summary, cover_image_id,
                igdb_critic, igdb_critic_n, metacritic, critic_score,
                igdb_user, igdb_user_n, steam_user, steam_user_n, user_den AS user_n, user_score,
                (critic_score + user_score) / 2.0 AS final_score
         FROM scored
-        WHERE critic_score IS NOT NULL AND user_score IS NOT NULL
-          AND user_den >= %(minu)s
-          AND (critic_score + user_score) / 2.0 >= %(minscore)s
-          AND critic_score >= %(mincritscore)s
-          AND user_score >= %(minuserscore)s
+        WHERE TRUE
+          {score_filters}
           {steam_clause}
           {exclude_clause}
-          {title_clause}
         {order_clause}
         {limit_clause}
     """
     if limit:
         params["lim"] = limit
     return conn.execute(query, params).fetchall()
-
 
 # ---------------------------------------------------------------------------
 # Running this file just creates the database (empty) if it doesn't exist.

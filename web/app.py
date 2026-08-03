@@ -77,25 +77,18 @@ def index():
     genre = request.args.get("genre") or None
     steam_only = request.args.get("steam") in ("1", "true", "yes")
     
-    search_query = (request.args.get("q")or "").strip()
-    
-    if search_query:
-        rows = db.search_games(
-            conn, 
-            title_query = search_query,
-            limit=limit,
-        )
-        search_mode = True
-    else:
-        rows = db.ranked_games(
-        
-            conn,
-            limit=limit,
-            steam_only=steam_only,
-            min_critic_count= min_critics,
-            min_user_count= min_users,
-        )
-        search_mode = False
+    search_query = (request.args.get("q") or "").strip()
+
+    rows = db.ranked_games(
+        conn,
+        limit=limit,
+        steam_only=steam_only,
+        min_critic_count=min_critics,
+        min_user_count=min_users,
+        title_search=search_query or None,
+        require_both_scores=not search_query,
+        sort_by="relevance" if search_query else "score",
+    )
     
     if genre:
         wanted = genre.lower()
@@ -116,8 +109,7 @@ def index():
         steam_only = steam_only,
         min_critics=min_critics,
         min_users=min_users,
-        search_query=search_query,
-        search_mode = search_mode    
+        search_query=search_query,  
     )
 
 
