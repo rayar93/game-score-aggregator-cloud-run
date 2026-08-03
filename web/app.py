@@ -50,15 +50,9 @@ def close_db(exception=None):
 @app.route("/")
 def index():
     """
-    The ranked list. A couple of filters are wired straight to query-string args
-    so we can see the db.py filters working without any form UI yet:
-
-        /                       top 50, review-count floors applied
-        /?limit=100             top 100
-        /?min_users=10000       require >= 10k combined user ratings
-        /?min_critics=10        IGDB critic score needs >= 10 reviews
-        /?genre=Roguelike       only games carrying that genre (IGDB or Steam)
-        /?steam=1               only games with a Steam store page
+    The ranked list with the full filter form. Every form field maps 1:1 with a query-string arg 
+    (q, sort, limit, min_critics, min_users, min_score, min_critic_score, min_user_score, min_year, 
+    max_year, critic_weight, genre (repeatable), exclude, steam), so any view is a shareable URL.
 
     """
     conn = get_db()
