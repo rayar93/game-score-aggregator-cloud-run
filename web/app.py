@@ -13,6 +13,7 @@ PORT env var, which the __main__ block below respects.
 """
 import os
 import sys
+import time
 
 from pathlib import Path
 
@@ -26,6 +27,18 @@ sys.path.insert(0, str(_ROOT))
 import db
 
 app = Flask(__name__)
+
+# Genre list for the form. all_genres() aggregates millions of rows (~10s) and
+# its answer only changes when ingestion runs, so cache it per process.
+_genres_cache = {"at": 0.0, "rows": None}
+_GENRES_TTL = 6 * 3600  # seconds
+
+def _genre_options(conn):
+    now = time.time()
+    if _genres_cache["rows"] is None or now - _genres_cache["at"] > _GENRES_TTL:
+        _genres_cache["rows"] = db.all_genres(conn)
+        _genres_cache["at"] = now
+    return _genres_cache["rows"]
 
 
 # ---------------------------------------------------------------------------
@@ -107,7 +120,7 @@ def index():
     )
 
     # genre list for the form checkboxes (most-common first, with counts)
-    genre_options = db.all_genres(conn)
+    genre_options = _genre_options(conn)
     top_names = [g["name"] for g in genre_options[:15]]
     more_open = any(g not in top_names for g in genres)
 
