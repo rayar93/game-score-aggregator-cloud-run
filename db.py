@@ -315,7 +315,8 @@ def ranked_games(conn, min_critic_count=0, min_user_count=0, limit=50,
                  steam_only=False, sort_by="score", min_score=0,
                  exclude_genres=None, include_genres=None, min_critic_score=0, 
                  min_user_score=0, title_search=None, require_both_scores=True, 
-                 critic_weight=0.5):
+                 critic_weight=0.5, strict_critic_count=False, min_year=None, 
+                 max_year=None):
     """
     Rank games by a critic/user blend.
 
@@ -419,10 +420,17 @@ def ranked_games(conn, min_critic_count=0, min_user_count=0, limit=50,
     # matching games, not the whole catalog.
     # LIMITATION: doesn't work on accent folding. Postgres fix is unaccent() +
     # pg_trgm, deferred to a later sprint.
-    title_where = ""
+    pivot_conds = []
     if title_search:
         params["title_q"] = f"%{title_search.lower()}%"
-        title_where = "WHERE LOWER(g.canonical_title) LIKE %(title_q)s"
+        pivot_conds.append("LOWER(g.canonical_title) LIKE %(title_q)s")
+    if min_year is not None:
+        params["miny"] = min_year
+        pivot_conds.append("g.release_year >= %(miny)s")
+    if max_year is not None:
+        params["maxy"] = max_year
+        pivot_conds.append("g.release_year <= %(maxy)s")
+    title_where = ("WHERE " + " AND ".join(pivot_conds)) if pivot_conds else ""
 
     if sort_by == "relevance" and title_search:
         params["title_exact"] = title_search.lower()
@@ -457,6 +465,19 @@ def ranked_games(conn, min_critic_count=0, min_user_count=0, limit=50,
                OR {blend} >= %(minscore)s)
           AND (critic_score IS NULL OR critic_score >= %(mincritscore)s)
           AND (user_score IS NULL OR user_score >= %(minuserscore)s)"""
+
+    # strict_critic_count turns min_critic_count into a hard filter: the game's
+    # IGDB critic review count itself must clear the floor. Without it (the
+    # default, and rank.py's documented behavior) a low-count IGDB rating is
+    # merely dropped from the critic average, and a Metacritic-only game passes
+    # any threshold. In search mode the floor only applies to games that have
+    # an IGDB critic rating at all - missing data passes, like the other floors.
+    if strict_critic_count:
+        strict_clause = ("AND COALESCE(igdb_critic_n, 0) >= %(minc)s"
+                         if require_both_scores else
+                         "AND (igdb_critic IS NULL OR COALESCE(igdb_critic_n, 0) >= %(minc)s)")
+    else:
+        strict_clause = ""
 
     query = f"""
         WITH pivot AS (
@@ -504,6 +525,7 @@ def ranked_games(conn, min_critic_count=0, min_user_count=0, limit=50,
         FROM scored
         WHERE TRUE
           {score_filters}
+          {strict_clause}
           {steam_clause}
           {include_clause}
           {exclude_clause}
