@@ -1,199 +1,142 @@
-# Team AAA - Summer 2026 - Game database
-CS 3537 Cloud Computing - **Team AAA**: Alan Ray, Anthony Samson, Aaron White.
+# Game Score Aggregator
 
-A videogame database and discovery tool that's more searchable, filterable, and
-complete than existing sites. It ingests game data and ratings from **IGDB**,
-**Steam**, and possibly later **OpenCritic** into a normalized **Cloud SQL**
-database, then blends critic and user scores, letting users search and filter 
-by genre, platform, developer, publisher, release year, and minimum rating counts.
+A video game discovery tool that blends critic and user scores from IGDB, Steam, and Metacritic into a single ranking across **310,480 titles**, searchable and filterable by genre, platform, developer, publisher, release year, and rating-count floors.
 
-**Live app:** https://gamedb-web-849131695635.us-east1.run.app/
+**Live:** https://gamedb-web-603466261030.us-east1.run.app
 
-## Architecture
+Originally built as a team project for CS 3537 Cloud Computing at Appalachian State University by **Alan Ray, Anthony Samson, and Aaron White**. Since the course ended it has been re-architected to run at effectively zero cost; the original Cloud SQL design is preserved in `Dockerfile.cloudsql` and described below.
 
-The whole application runs on **Cloud Run** as Docker containers:
+## How it works
 
-- **Web service** (`web/` + `db.py`) - a containerized Flask app that serves the
-  frontend and all search/filter/ranking queries. The only part that talks to the
-  database, and all database access happens in the cloud.
-- **Cloud SQL (PostgreSQL)** - the cloud-hosted relational database. There is one
-  shared instance; everyone develops against it directly (see [Working against the shared 
-  database](#working-against-the-shared-database)).
-- **Ingestion job** (`ingest/` + `db.py`) - the data-fetching scripts, run as a
-  Cloud Run job on a Cloud Scheduler trigger to keep the catalog current (see 
-  [Ingestion](#ingestion)).
+The whole application is one Cloud Run container with **no database server**. A read-only SQLite snapshot of the catalog is baked into the image, so a request is served entirely from local disk — no network hop, no connection pool, no instance billing by the hour while nobody is visiting.
+
+```
+                    ┌─────────────────────────────────┐
+   request  ───────▶│  Cloud Run (scales to zero)     │
+                    │  ┌───────────────────────────┐  │
+                    │  │ Flask + gunicorn          │  │
+                    │  │ web/app.py                │  │
+                    │  ├───────────────────────────┤  │
+                    │  │ db_sqlite.py (read-only)  │  │
+                    │  ├───────────────────────────┤  │
+                    │  │ gamedb.sqlite   423 MB    │  │
+                    │  └───────────────────────────┘  │
+                    └─────────────────────────────────┘
+```
+
+Every filter in the UI maps one-to-one onto a query-string parameter, so any view is a shareable URL — `?q=zelda`, `?genre=Adventure&min_score=85`, `?sort=popularity&min_users=4000`.
+
+### The ranking
+
+- **Critic score** — a plain average of the usable critic sources: IGDB's critic rating (dropped from the average when its review count falls below the threshold, as a noise filter) and Metacritic (always used when present; it carries no review count, so it can't be count-weighted).
+- **User score** — a count-weighted average of Steam's percent-positive and IGDB's user rating, weighted by how many people are behind each.
+- **Final** — `critic × w + user × (1 − w)`, with `w` exposed in the UI as a slider.
+
+A game needs both a critic and a user score to appear in the ranking. Search mode relaxes that, returning partial-score games with nulls.
+
+## Why it's built this way
+
+The graded version ran a Cloud SQL PostgreSQL instance (`db-g1-small`) behind Cloud Run, with the ingestion job on a Cloud Scheduler trigger and credentials in Secret Manager. It worked, and it cost about **$1/day** — because a managed database bills continuously whether or not anyone visits, while Cloud Run bills only per request.
+
+For a project whose data no longer needs to change, that's the wrong trade. The rebuild made three findings:
+
+**The database was mostly staging data.** `raw_fetch` — the landing table holding every raw IGDB and Steam API response as JSONB — was **5,412 MB of the 6,168 MB database, 87.7%**. Nothing in the serving path reads it; its only consumer was an existence check in the ingest pipeline. Excluding it left ~756 MB of actual serving data.
+
+**Postgres row overhead dominated what remained.** `game_attribute` is 3.4M rows of two integers — 16 bytes of payload each — occupying 340 MB, roughly 100 bytes per row once the 23-byte tuple header, alignment padding, and index are counted. SQLite stores the same table far more compactly. The 756 MB became a **423 MB** file including indexes.
+
+**The query layer was already portable.** The ranking query used no Postgres-only syntax — no `ILIKE`, no `array_agg`, no JSONB operators, no casts. Porting the read path meant changing `%(name)s` placeholders to `:name` and swapping the row factory. The SQL itself is unchanged.
+
+Result: **~$1/day → effectively $0**, inside Cloud Run's free tier.
+
+### What was fixed along the way
+
+Comparing the two backends surfaced a real bug: no `ORDER BY` ended in a unique column, so rows tied on the sort key had no defined order — nondeterministic in Postgres too, across query plans. Every ordering now ends in `game_id`. The alphabetical tiebreak also moved from `canonical_title` to `normalized_title`, which is already lowercased and punctuation-stripped, so `Zelda's Adventure` and `Zeldas Adventure` sort together instead of pages apart.
+
+## The snapshot
+
+`gamedb.sqlite` is **not in this repository** — at 423 MB it exceeds GitHub's 100 MB file limit. It's published as a **[Release](../../releases)** asset and downloaded before building.
+
+| Table | Rows |
+|---|---:|
+| game | 310,480 |
+| game_attribute | 3,366,527 |
+| game_company | 510,661 |
+| game_source_ref | 457,810 |
+| game_score | 192,476 |
+| company | 137,942 |
+| attribute | 9,462 |
+
+Provenance lives in the file itself — `SELECT * FROM snapshot_meta` records when it was taken, what it came from, and what was excluded.
+
+## Running locally
+
+```bash
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -r requirements-frozen.txt
+
+# fetch gamedb.sqlite from the Releases page into the repo root, then:
+python db_sqlite.py                # smoke test: prints metadata and the top 5
+gunicorn --bind :8080 web.app:app  # http://localhost:8080
+```
+
+No credentials, no proxy, no `.env`. The serving path needs nothing but Python and the snapshot file.
+
+## Deploying
+
+```bash
+gcloud builds submit --tag us-east1-docker.pkg.dev/gamedb-rayar93/gamedb/gamedb-web:VERSION .
+
+gcloud run deploy gamedb-web \
+  --image us-east1-docker.pkg.dev/gamedb-rayar93/gamedb/gamedb-web:VERSION \
+  --region us-east1 --allow-unauthenticated --port 8080 \
+  --memory 1Gi --cpu 1 \
+  --set-env-vars "DB_PATH=/app/gamedb.sqlite"
+```
+
+The image is ~208 MB compressed. `gamedb.sqlite` must be in the build context — note that `.dockerignore` excludes `*.db`, so the `.sqlite` extension is load-bearing.
+
+## Refreshing the catalog
+
+The ingestion pipeline is intact but is **not** part of the running service, and refreshing is deliberately a manual, offline operation:
+
+1. Stand up PostgreSQL and apply `schema.sql`
+2. Run `ingest/run_refresh.py` with `db.py` (needs Twitch/IGDB credentials from https://dev.twitch.tv/console; Steam needs no key)
+3. `python pg_to_sqlite.py --out gamedb.sqlite`
+4. `sqlite3 gamedb.sqlite < prepare_snapshot.sql`
+5. Publish as a new Release asset, rebuild, redeploy
+
+Both ingest passes are idempotent, so re-running is safe.
 
 ## Repository layout
-```
-team-AAA-summer2026/
-├── README.md
-├── requirements.txt                # install into your venv: pip install -r requirements.txt
-├── .gitignore
-├── Dockerfile                      # builds the Cloud Run image
-├── Dockerfile.ingest               # builds the ingestion image
-├── .dockerignore
-├── Dockerfile.ingest.dockerignore
-├── .env.example                    # template; copy to a local .env (see Setup)
-├── schema.sql                      # database schema (PostgreSQL)
-├── db.py                           # shared data-access layer
-├── rank.py                         # a CLI tool demonstrating how to call ranked_games
-├── web/                            # Cloud Run service
-│   ├── app.py                      # Flask app
-│   └── templates/                  # Jinja2 pages
-└── ingest/                         # Cloud Run Job - WRITES to the shared DB; be careful
-    ├── run_refresh.py
-    ├── igdb.py
-    └── steam.py
 
 ```
+Dockerfile                  # frozen build - what runs in production
+Dockerfile.cloudsql         # the original Cloud SQL build, kept for reference
+requirements-frozen.txt     # Flask + gunicorn (sqlite3 is stdlib)
+requirements.txt            # full set, for ingestion and the Postgres path
 
-## Setup
+web/app.py                  # Flask routes and filter parsing
+web/templates/              # Jinja2
 
-We develop directly against the shared **Cloud SQL** instance through the Cloud
-SQL Auth Proxy - a small local program that opens a secure tunnel so your code can
-reach the cloud database. It authenticates with your Google account, so there's 
-no IP allowlisting or public exposure to deal with.
+db_sqlite.py                # read-only SQLite data layer  <- production
+db.py                       # PostgreSQL data layer, read + write  <- ingestion
+schema.sql                  # PostgreSQL schema
+rank.py                     # CLI demo of the ranking query
 
-One-time setup:
-
-```bash
-# 1. clone, then from the repo folder, make a venv:
-python -m venv .venv
-
-# 2. activate it
-.\.venv\Scripts\Activate.ps1   # Windows (PowerShell)
-source .venv/bin/activate      # macOS/Linux
-
-# 3. install dependencies
-pip install -r requirements.txt
-
-# 4. authenticate for the proxy (opens a browser)
-gcloud auth application-default login
-
-# 5. install the Cloud SQL Auth Proxy
-gcloud components install cloud-sql-proxy
-
-# 6. create your .env from the template, then fill in DB_PASSWORD (see Secrets below)
-copy .env.example .env         # Windows
-cp   .env.example .env         # macOS/Linux
+ingest/                     # IGDB + Steam ingestion (offline)
+pg_to_sqlite.py             # builds the snapshot from Postgres
+prepare_snapshot.sql        # precomputes the genre list into the snapshot
+compare_backends.py         # diffs SQLite output against Postgres
 ```
 
-**Every time you develop:** start the proxy in its own terminal and leave it open:
+## Known limitations
 
-```bash
-cloud-sql-proxy rayar-cs3537-2026:us-east1:gamedb-pg
-```
+- The catalog is a **frozen snapshot**. Scores and new releases do not update until someone runs the refresh above.
+- Title search is a case-insensitive substring match with no accent folding — `pokemon` won't find `Pokémon`. Postgres had `unaccent` + `pg_trgm` available; the SQLite build would need a normalized search column.
+- IGDB and Steam name genres differently (`Role-playing (RPG)` vs `RPG`) and are not mapped to a shared taxonomy, so both spellings appear in the filter list.
+- Cold starts pull a 208 MB image, so the first request after an idle period takes a few seconds. Subsequent requests are fast.
 
-It should print that it's listening and then sit quietly. 
-In a second terminal (venv active), run `python rank.py 20`;
-if you get 20 real games back, you're wired up and can start the app.
+## Data
 
-If the proxy errors about credentials, your login expired - re-run
-`gcloud auth application-default login`.
-
-## Secrets
-
-**Google Secret Manager is the canonical home of every secret.** Nothing is
-distributed by hand: deployed containers get secrets injected as environment
-variables at container start (`--set-secrets`), and for local development you
-pull the same values into a git-ignored `.env` yourself:
-
-    gcloud secrets versions access latest --secret=[SECRET NAME]
-
-The code can't tell the difference - `db.py` and the ingest scripts just read
-environment variables in both worlds.
-
-There are four secrets. Which ones you need depends on what you're running:
-
-| Secret Manager name    | Goes in env var        | Needed by                                  |
-|------------------------|------------------------|--------------------------------------------|
-| `db-password-web`      | `DB_PASSWORD`          | web app + **all local development** (DB user `gamedb_web`) |
-| `db-password-ingest`   | `DB_PASSWORD`          | ingestion job only (DB user `gamedb_ingest`) |
-| `twitch-client-id`     | `TWITCH_CLIENT_ID`     | ingestion job only (IGDB authenticates through Twitch; Steam needs no key) |
-| `twitch-client-secret` | `TWITCH_CLIENT_SECRET` | ingestion job only                         |
-
-For normal development you only need `db-password-web` - it pairs with
-`DB_USER=gamedb_web`, which `.env.example` already sets. The web app never
-touches the Twitch keys.
-
-The ingest credentials matter only in the rare, deliberate case of running the
-ingestion scripts locally (see [Working against the shared
-database](#working-against-the-shared-database)): set `DB_USER=gamedb_ingest`,
-with `DB_PASSWORD` from `db-password-ingest`, plus both Twitch values.
-
-`.env.example` lists the variable names with no real values. **Never put a
-real key or password in a committed file.** If `gcloud secrets versions access`
-gives a permissions error, you're missing the Secret Manager accessor role on
-the project - fix the IAM grant rather than sharing values over chat.
-
-## Working against the shared database
-
-There is **one** Cloud SQL instance and we all develop against it. Two things
-follow from that:
-
-- **Reads are safe to share.** The web app and `rank.py` only read, so everyone
-  querying at once is fine.
-- **Do NOT run the ingestion scripts (`ingest/igdb.py`, `ingest/steam.py`) casually.**
-  They **write** to the shared database - the same data the app and the demo depend
-  on. Running them (especially `--all`) mutates everyone's data. The catalog is
-  already loaded; ingestion only needs to run deliberately, when we've agreed to
-  refresh it.
-
-## Deployment (web service)
-
-The web service runs on Cloud Run and connects to Cloud SQL through the
-Cloud Run <-> Cloud SQL socket integration, so it needs no proxy - that's
-local-dev only.
-
-Redeploy after a code change (build from the repo root):
-
-    docker build -t gamedb-web .
-    docker tag gamedb-web us-east1-docker.pkg.dev/rayar-cs3537-2026/gamedb/gamedb-web:[VERSION TAG]
-    docker push us-east1-docker.pkg.dev/rayar-cs3537-2026/gamedb/gamedb-web:[VERSION TAG]
-    gcloud run deploy gamedb-web \
-      --image us-east1-docker.pkg.dev/rayar-cs3537-2026/gamedb/gamedb-web:[VERSION TAG] \
-      --region us-east1 --allow-unauthenticated --port 8080 \
-      --add-cloudsql-instances rayar-cs3537-2026:us-east1:gamedb-pg \
-      --set-env-vars "DB_HOST=/cloudsql/rayar-cs3537-2026:us-east1:gamedb-pg,DB_NAME=gamedb,DB_USER=gamedb_web" \
-      --set-secrets "DB_PASSWORD=db-password-web:latest"
-
-**The `--set-secrets` line is not optional.** It's what injects the database
-password from Secret Manager. A deploy that instead passes a plaintext
-`DB_PASSWORD` env var reverts the service to the pre-Secret-Manager setup.
-
-## Ingestion
-
-The ingestion job (`ingest/run_refresh.py` in the `gamedb-ingest` image) refreshes
-the catalog in two passes: an IGDB catalog walk that upserts every game, then a
-self-limiting Steam pass that fills in reviews/details for whatever's missing.
-Both passes are idempotent, so re-running is safe.
-
-**Schedule: it runs as a Cloud Run job every other day at 3:00 AM ET**, triggered
-by Cloud Scheduler (job `gamedb-ingest-scheduler-trigger`, cron `0 3 */2 * *`,
-America/New_York). If you change the schedule, update this paragraph too - it's
-the only place the cadence is written down.
-
-To change the schedule:
-
-    gcloud scheduler jobs update http gamedb-ingest-scheduler-trigger \
-      --location=us-east1 --schedule="0 3 */2 * *" --time-zone="America/New_York"
-
-(`gcloud scheduler jobs list --location=us-east1` shows the job name.)
-
-Redeploy the ingestion image after a code change (build from the repo root;
-`gcloud run jobs update` with only `--image` keeps the job's existing secrets
-and env vars from Secret Manager):
-
-    docker build -f Dockerfile.ingest -t gamedb-ingest .
-    docker tag gamedb-ingest us-east1-docker.pkg.dev/rayar-cs3537-2026/gamedb/gamedb-ingest:[VERSION TAG]
-    docker push us-east1-docker.pkg.dev/rayar-cs3537-2026/gamedb/gamedb-ingest:[VERSION TAG]
-    gcloud run jobs update gamedb-ingest \
-      --image us-east1-docker.pkg.dev/rayar-cs3537-2026/gamedb/gamedb-ingest:[VERSION TAG] \
-      --region us-east1
-
-(`gcloud run jobs list --region=us-east1` shows the job name.)
-
-To force a refresh right now instead of waiting for the schedule:
-`gcloud run jobs execute gamedb-ingest --region=us-east1` - but remember
-this **writes to the shared database**, so treat it like running the ingest
-scripts by hand: only when the team has agreed to refresh.
+Game data is the property of IGDB, Steam, and Metacritic. It was collected for coursework and is redistributed here as a static snapshot for demonstration only.
