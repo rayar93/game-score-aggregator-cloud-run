@@ -24,7 +24,7 @@ from flask import Flask, render_template, request, g
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT))
 
-import db
+import db_sqlite as db
 
 app = Flask(__name__)
 

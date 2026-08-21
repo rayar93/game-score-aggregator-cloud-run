@@ -31,3 +31,11 @@ cloud-sql-proxy
 cloud-sql-proxy.exe
 cloud-sql-proxy.x64.exe
 *.x64.exe
+# --- frozen snapshot ---
+# 423 MB, over GitHub's 100 MB file limit. Distributed as a
+# Release asset instead; see README.
+gamedb.sqlite
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+gamedb-full.sql.gz

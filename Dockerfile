@@ -1,43 +1,47 @@
-# Dockerfile - packages the Flask web service for Cloud Run.
+# Dockerfile.frozen - the whole application in one image, no database server.
 #
-# Build from the repo root, not from web/:
-#     docker build -t gamedb-web .
-# The build context must be the root because db.py lives there (shared with the
-# ingest scripts) and the app imports it. A build context inside web/ can't reach
-# a file one level up, so COPY db.py would be impossible.
+# The original Dockerfile builds a container that talks to Cloud SQL over the
+# Cloud Run <-> Cloud SQL socket. This one carries the data with it: a 423 MB
+# read-only SQLite snapshot sits inside the image, so the running service has no
+# database to connect to, no password to inject, and nothing billing by the hour
+# while nobody is visiting.
 #
-# Run locally to confirm the container works before deploying (Task 8):
-#     docker run -p 8080:8080 --env-file .env gamedb-web
-# then open http://localhost:8080  (the --env-file passes your DB_* vars in;
-# the Cloud SQL Auth Proxy must be reachable from the container - see the notes
-# at the bottom about why localhost differs inside a container).
+# Build from the repo root, with gamedb.sqlite present there:
+#
+#     sqlite3 gamedb.sqlite < prepare_snapshot.sql     # once, before building
+#     docker build -f Dockerfile.frozen -t gamedb-web .
+#
+# gamedb.sqlite is deliberately NOT in git - at 423 MB it exceeds GitHub's
+# 100 MB file limit. It lives as a GitHub Release asset (2 GB limit) and is
+# downloaded before the build. See README.
 
 FROM python:3.12-slim
 
-# Don't buffer stdout/stderr - logs show up in Cloud Run immediately. And don't
-# write .pyc files into the image.
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
 WORKDIR /app
 
-# Install dependencies FIRST, as their own layer. Docker caches layers, so as long
-# as requirements.txt doesn't change, rebuilds skip re-installing everything even
-# when the app code changed. Copy just the requirements, install, THEN copy code.
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Only Flask and gunicorn now. The frozen build never imports db.py, so psycopg
+# and its bundled libpq are dead weight - dropping them takes tens of MB off an
+# image that is already large because of the data.
+COPY requirements-frozen.txt .
+RUN pip install --no-cache-dir -r requirements-frozen.txt
 
-# Copy the shared data layer (from the repo root) and the web app. This is the
-# whole reason the build context is the root: db.py is not inside web/.
-COPY db.py .
-COPY schema.sql .
+# Application code. db.py and schema.sql are intentionally absent: the write
+# path and the Postgres DDL have no role in a read-only deployment.
+COPY db_sqlite.py .
 COPY web/ ./web/
 
-# Cloud Run sends traffic to whatever port the container listens on, provided via
-# the PORT env var (defaults to 8080). gunicorn is the production WSGI server -
-# Flask's built-in server is for development only.
-#
-# `web.app:app` means: in the module web/app.py, serve the Flask object named `app`.
-# The shell form lets $PORT expand at runtime (Cloud Run sets it).
+# The data. Last, and in its own layer, because it is by far the largest thing
+# here and almost never changes - so edits to the app rebuild in seconds instead
+# of re-pushing 423 MB.
+COPY gamedb.sqlite .
+
+# Cloud Run's docs are explicit that image size does not count against the
+# instance memory limit, so the snapshot rides along without consuming RAM.
+# Only what the process allocates does.
+ENV DB_PATH=/app/gamedb.sqlite
+
 ENV PORT=8080
 CMD ["sh", "-c", "exec gunicorn --bind :$PORT --workers 2 --threads 4 --timeout 60 web.app:app"]

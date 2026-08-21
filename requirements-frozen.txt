@@ -1,0 +1,9 @@
+# Dependencies for the frozen (SQLite) deployment.
+#
+# The full requirements.txt additionally installs psycopg[binary], requests and
+# python-dotenv, which the ingest pipeline and the Postgres data layer need.
+# This build imports none of them: sqlite3 is in the Python standard library, so
+# the serving container needs nothing but the web stack.
+
+Flask
+gunicorn
