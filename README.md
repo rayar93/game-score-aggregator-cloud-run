@@ -1,10 +1,12 @@
-# Game Score Aggregator
+# Game Score Aggregator (Cloud Run)
 
 A video game discovery tool that blends critic and user scores from IGDB, Steam, and Metacritic into a single ranking across **310,480 titles**, searchable and filterable by genre, platform, developer, publisher, release year, and rating-count floors.
 
+Team project - CS 3537 Cloud Computing, Appalachian State University.
+
 **Live:** https://gamedb-web-603466261030.us-east1.run.app
 
-Originally built as a team project for CS 3537 Cloud Computing at Appalachian State University by **Alan Ray, Anthony Samson, and Aaron White**. Since the course ended it has been re-architected to run at effectively zero cost; the original Cloud SQL design is preserved in `Dockerfile.cloudsql` and described below.
+Originally built by **Alan Ray, Anthony Samson, and Aaron White**. Since the course ended it has been re-architected to run at effectively zero cost; the original Cloud SQL design is preserved in `Dockerfile.cloudsql` and described below.
 
 ## How it works
 
