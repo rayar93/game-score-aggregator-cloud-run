@@ -4,12 +4,12 @@ app.py - web front-end for the game database.
 Serves the ranked game list (the same blend rank.py prints, but as an HTML page)
 and a /health check for Cloud Run. This file turns db calls into web pages.
 
-Run locally with the Cloud SQL Auth Proxy running:
+Run locally with gamedb.sqlite in the repo root (or DB_PATH pointing at it):
 
     python web/app.py            # dev server on http://127.0.0.1:8080
 
-In production it's served by gunicorn (see the Dockerfile); Cloud Run sets the
-PORT env var, which the __main__ block below respects.
+In production it's served by gunicorn (see the Dockerfile), which binds to the
+PORT that Cloud Run sets; the __main__ block below respects PORT for local runs.
 """
 import os
 import sys
@@ -19,8 +19,8 @@ from pathlib import Path
 
 from flask import Flask, render_template, request, g
 
-# db.py lives at the repo root; this file lives in web/. Put the root on the import
-# path so `import db` works whether run as `python web/app.py` or by gunicorn.
+# db_sqlite.py lives at the repo root; this file lives in web/. Put the root on the
+# import path so `import db_sqlite` works whether run as `python web/app.py` or by gunicorn.
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT))
 
@@ -28,8 +28,9 @@ import db_sqlite as db
 
 app = Flask(__name__)
 
-# Genre list for the form. all_genres() aggregates millions of rows (~10s) and
-# its answer only changes when ingestion runs, so cache it per process.
+# Genre list for the form. On the snapshot, all_genres() reads the precomputed
+# genre_counts table; the cache only matters if that table is missing and it
+# falls back to aggregating ~3.4M rows live. Cached per process either way.
 _genres_cache = {"at": 0.0, "rows": None}
 _GENRES_TTL = 6 * 3600  # seconds
 

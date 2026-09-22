@@ -6,9 +6,11 @@ one line:
 
     import db_sqlite as db          # was: import db
 
-Everything web/app.py calls - get_connection, all_genres, genres_for,
-ranked_games - keeps the same name, signature and return shape, so app.py itself
-needs no other change.
+The read functions keep db.py's names, signatures and return shapes. web/app.py
+calls three of them - get_connection, all_genres, ranked_games - so it needed no
+other change. The rest (attributes_for, genres_for, unsorted_games,
+games_by_status, find_game_by_source) are ported too, so rank.py or anything
+else on the read side can switch the same way.
 
 WHAT IS NOT HERE: the write functions (add_game, add_score, stage_raw,
 link_source, update_game, set_status, ensure_source, add_attributes,
@@ -16,11 +18,13 @@ add_companies). A frozen snapshot has nothing to write. Those live on in db.py,
 which the ingest scripts still use if you ever refresh the catalog from
 Postgres and rebuild the snapshot.
 
-THE PORT, IN FULL: psycopg's %(name)s placeholders become SQLite's :name, the
-one %s positional becomes ?, and rows come back as sqlite3.Row instead of
-psycopg's dict_row. sqlite3.Row already supports row["column"], so every caller
-keeps working untouched. The SQL itself is unchanged - the ranking query used no
-Postgres-only syntax. NULLS LAST needs SQLite 3.30+ (Python 3.12 ships 3.37+).
+THE PORT: psycopg's %(name)s placeholders become SQLite's :name, the one %s
+positional becomes ?, and rows come back as sqlite3.Row instead of psycopg's
+dict_row. sqlite3.Row already supports row["column"], so every caller keeps
+working untouched. The ranking query used no Postgres-only syntax, so its
+filtering and scoring are unchanged; the one deliberate difference is
+ordering - see ranked_games. NULLS LAST needs SQLite 3.30+ (Python 3.12 ships
+3.37+).
 """
 
 import os
@@ -105,12 +109,12 @@ def all_genres(conn):
     Every distinct genre name across all sources, with how many games carry each,
     most-common first.
 
-    app.py's comment notes this "aggregates millions of rows (~10s)" and caches it
-    for 6 hours. On a frozen snapshot the answer can never change, so it does not
-    need computing at all - prepare_snapshot.sql materializes it into
-    genre_counts, and this reads that instead. It matters because Cloud Run
-    scales to zero: without it, the first visitor after an idle period waits for
-    the aggregate on top of the cold start.
+    Computing this live means aggregating the 3.4M-row game_attribute table -
+    about 10 seconds on the original Postgres build, which is why app.py caches
+    the result per process. On a frozen snapshot the answer can never change, so
+    prepare_snapshot.sql materializes it into genre_counts and this reads that
+    instead. It matters because Cloud Run scales to zero: without it, the first
+    visitor after an idle period waits for the aggregate on top of the cold start.
 
     Falls back to computing live if genre_counts is absent, so a snapshot built
     without the prepare step still works.
@@ -174,8 +178,12 @@ def ranked_games(conn, min_critic_count=0, min_user_count=0, limit=50,
                  critic_weight=0.5, strict_critic_count=False, min_year=None,
                  max_year=None):
     """
-    Rank games by a critic/user blend. Semantics are identical to db.ranked_games -
-    see that docstring for the full contract. Only the placeholder syntax changed.
+    Rank games by a critic/user blend. Filters and scoring match db.ranked_games -
+    see that docstring for the details. Ordering deliberately differs: every
+    ORDER BY here ends in game_id, and the relevance sort's alphabetical key is
+    normalized_title instead of canonical_title (the comments below explain both),
+    so rows tied on the sort key can come back in a different order than db.py
+    returns them.
     """
     params = {"minc": min_critic_count, "minu": min_user_count, "minscore": min_score,
               "mincritscore": min_critic_score, "minuserscore": min_user_score}
