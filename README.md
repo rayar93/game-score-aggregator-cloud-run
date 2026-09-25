@@ -142,3 +142,7 @@ compare_backends.py         # diffs SQLite output against Postgres
 ## Data
 
 Game data is the property of IGDB, Steam, and Metacritic. It was collected for coursework and is redistributed here as a static snapshot for demonstration only.
+
+## Presentation
+
+- **Presentation:** [reports/presentation.pdf](reports/presentation.pdf) - the six-slide CS 3537 final presentation, which covers the graded Cloud SQL version rather than the SQLite rebuild described above
